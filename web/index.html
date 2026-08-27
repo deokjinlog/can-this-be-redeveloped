@@ -1,0 +1,441 @@
+<title>재개발 신호등</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+:root{
+  --ground:#eef1f0; --surface:#ffffff; --surface-2:#e6ebe9; --inset:#f4f6f5;
+  --ink:#15201e; --ink-2:#475652; --ink-3:#6f7d79;
+  --line:#d6ddda; --line-2:#c0c9c5;
+  --accent:#0f6b5f; --accent-soft:#d9ebe7;
+  --go:#1c7a4b;   --go-bg:#dcede2;   --go-line:#8fc4a9;
+  --no:#b0392f;   --no-bg:#f3ddd9;   --no-line:#e0a79f;
+  --hold:#8a6a12; --hold-bg:#f1e7cb; --hold-line:#d8c58a;
+  --shadow:0 1px 2px rgba(21,32,30,.05),0 12px 30px -22px rgba(21,32,30,.4);
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  --sans:"IBM Plex Sans KR","IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Malgun Gothic",sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --ground:#0f1413; --surface:#171d1c; --surface-2:#202726; --inset:#131817;
+  --ink:#e3e9e7; --ink-2:#a3b0ac; --ink-3:#78857f;
+  --line:#28302e; --line-2:#3a4441;
+  --accent:#4fbfaf; --accent-soft:#12302c;
+  --go:#5bc088;   --go-bg:#142a1f;   --go-line:#295c40;
+  --no:#e07c72;   --no-bg:#2c1a17;   --no-line:#5a2f29;
+  --hold:#d7ac4c; --hold-bg:#2a2413; --hold-line:#524319;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 30px -22px rgba(0,0,0,.8);
+}}
+:root[data-theme="dark"]{
+  --ground:#0f1413; --surface:#171d1c; --surface-2:#202726; --inset:#131817;
+  --ink:#e3e9e7; --ink-2:#a3b0ac; --ink-3:#78857f;
+  --line:#28302e; --line-2:#3a4441;
+  --accent:#4fbfaf; --accent-soft:#12302c;
+  --go:#5bc088;   --go-bg:#142a1f;   --go-line:#295c40;
+  --no:#e07c72;   --no-bg:#2c1a17;   --no-line:#5a2f29;
+  --hold:#d7ac4c; --hold-bg:#2a2413; --hold-line:#524319;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 30px -22px rgba(0,0,0,.8);
+}
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
+  font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+h1,h2,h3{margin:0;line-height:1.25;letter-spacing:-.02em;text-wrap:balance}
+button{font-family:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.top{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--ground) 90%,transparent);
+  backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.top-in{max-width:1120px;margin:0 auto;padding:12px 22px;display:flex;align-items:center;gap:14px}
+.logo{display:flex;align-items:center;gap:9px;font-weight:700;font-size:16px;letter-spacing:-.03em}
+.lamp{display:inline-flex;flex-direction:column;gap:2px;padding:3px;border-radius:5px;
+  background:#20302c;border:1px solid #34433e}
+.lamp i{width:8px;height:8px;border-radius:50%;opacity:.28}
+.lamp i.r{background:#e0554a} .lamp i.y{background:#e0b23f} .lamp i.g{background:#49c07e}
+.lamp i.on{opacity:1;box-shadow:0 0 7px currentColor}
+.tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.02em;text-transform:uppercase;
+  color:var(--ink-3);padding:3px 7px;border:1px solid var(--line-2);border-radius:3px}
+.top .sp{flex:1}
+.tbtn{font-family:var(--mono);font-size:11px;color:var(--ink-2);background:var(--surface);
+  border:1px solid var(--line-2);border-radius:4px;padding:5px 9px}
+.tbtn:hover{color:var(--ink);background:var(--surface-2)}
+
+.wrap{max-width:1120px;margin:0 auto;padding:22px}
+.intro{margin:6px 0 20px;max-width:640px}
+.intro h1{font-size:clamp(22px,3.4vw,30px);font-weight:700;margin-bottom:8px}
+.intro p{color:var(--ink-2);font-size:15px}
+.intro .scope{margin-top:10px;font-size:12.5px;color:var(--ink-3);font-family:var(--mono);
+  border-left:2px solid var(--line-2);padding-left:10px}
+
+.grid{display:grid;grid-template-columns:minmax(0,360px) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:860px){.grid{grid-template-columns:1fr}}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow)}
+.panel-h{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+.panel-h .n{font-family:var(--mono);font-size:11px;color:var(--accent);font-weight:600;
+  border:1px solid var(--accent);border-radius:3px;padding:1px 6px}
+.panel-h h3{font-size:14px;font-weight:600}
+.panel-b{padding:14px 16px}
+.presets{display:flex;flex-wrap:wrap;gap:6px;padding:0 16px 12px}
+.preset{font-family:var(--mono);font-size:11px;color:var(--ink-2);background:var(--inset);
+  border:1px solid var(--line);border-radius:20px;padding:4px 10px}
+.preset:hover{border-color:var(--accent);color:var(--accent)}
+
+fieldset{border:none;margin:0;padding:0}
+.leg{font-family:var(--mono);font-size:10.5px;letter-spacing:.03em;text-transform:uppercase;
+  color:var(--ink-3);margin:16px 0 9px;display:flex;align-items:center;gap:7px}
+.leg:first-child{margin-top:2px}
+.leg::after{content:"";flex:1;height:1px;background:var(--line)}
+.f{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
+.f label{font-size:12.5px;color:var(--ink-2)}
+.f .hint{font-size:11px;color:var(--ink-3)}
+.f input,.f select{font-family:var(--mono);font-size:14px;font-variant-numeric:tabular-nums;
+  padding:7px 9px;border:1px solid var(--line-2);border-radius:5px;background:var(--inset);
+  color:var(--ink);width:100%}
+.f input::placeholder{color:var(--ink-3)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.chk{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-2);margin-bottom:8px}
+.chk input{width:16px;height:16px;accent-color:var(--accent)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+.chip{font-size:12px;color:var(--ink-2);background:var(--inset);border:1px solid var(--line-2);
+  border-radius:20px;padding:5px 11px;user-select:none}
+.chip[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600}
+
+/* verdict */
+.verdict{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface);box-shadow:var(--shadow)}
+.combo{padding:18px 20px;display:flex;align-items:center;gap:16px;border-bottom:1px solid var(--line)}
+.signal{flex-shrink:0;display:flex;flex-direction:column;gap:5px;padding:8px;border-radius:9px;
+  background:#1c2b27;border:1px solid #33423d}
+.signal i{width:22px;height:22px;border-radius:50%;opacity:.22;transition:opacity .25s,box-shadow .25s}
+.signal i.r{background:#e0554a} .signal i.y{background:#e0b23f} .signal i.g{background:#49c07e}
+.signal i.on{opacity:1;box-shadow:0 0 14px currentColor}
+@media (prefers-reduced-motion:reduce){.signal i{transition:none}}
+.combo-t .k{font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3)}
+.combo-t .v{font-size:22px;font-weight:700;letter-spacing:-.02em;margin-top:2px}
+.combo-t .s{font-size:13px;color:var(--ink-2);margin-top:4px}
+.v.go{color:var(--go)} .v.no{color:var(--no)} .v.hold{color:var(--hold)}
+
+.mods{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line)}
+@media (max-width:520px){.mods{grid-template-columns:1fr}}
+.mod{background:var(--surface);padding:15px 18px}
+.mod-h{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px}
+.mod-h .t{font-size:13px;font-weight:600}
+.mod-h .t small{display:block;font-weight:400;color:var(--ink-3);font-size:11px;margin-top:1px}
+.pill{font-family:var(--mono);font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px;white-space:nowrap}
+.pill.go{color:var(--go);background:var(--go-bg);border:1px solid var(--go-line)}
+.pill.no{color:var(--no);background:var(--no-bg);border:1px solid var(--no-line)}
+.pill.hold{color:var(--hold);background:var(--hold-bg);border:1px solid var(--hold-line)}
+
+.reqs{display:flex;flex-direction:column;gap:0}
+.req{padding:9px 0;border-top:1px dashed var(--line)}
+.req:first-child{border-top:none}
+.req-top{display:flex;align-items:flex-start;gap:9px}
+.dot{width:9px;height:9px;border-radius:50%;margin-top:5px;flex-shrink:0}
+.dot.MET{background:var(--go)} .dot.NOT_MET{background:var(--no)}
+.dot.INSUFFICIENT{background:var(--hold)} .dot.CONFLICT{background:var(--no);box-shadow:0 0 0 3px var(--no-bg)}
+.dot.NA{background:var(--ink-3);opacity:.5}
+.req-name{font-size:12.5px;font-weight:500;flex:1}
+.req-name .law{display:block;font-family:var(--mono);font-size:10px;color:var(--ink-3);margin-top:1px;font-weight:400}
+.req-val{font-family:var(--mono);font-size:11.5px;color:var(--ink-2);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.req-ev{margin:5px 0 0 18px;font-size:11px;color:var(--ink-3);font-family:var(--mono)}
+.req-ev b{color:var(--ink-2);font-weight:500}
+.na-row{opacity:.5}
+
+.ask{margin:14px 16px 4px;padding:12px 14px;border-radius:7px;background:var(--accent-soft);
+  border:1px solid color-mix(in srgb,var(--accent) 40%,transparent)}
+.ask .h{font-size:12px;font-weight:600;color:var(--accent);margin-bottom:7px;display:flex;align-items:center;gap:6px}
+.ask ul{margin:0;padding-left:18px}
+.ask li{font-size:12.5px;color:var(--ink);margin-bottom:3px}
+.foot{padding:12px 16px;border-top:1px solid var(--line);font-size:11px;color:var(--ink-3);line-height:1.6}
+.foot b{color:var(--ink-2);font-weight:500}
+a{color:var(--accent)}
+</style>
+
+<div class="top"><div class="top-in">
+  <span class="logo"><span class="lamp"><i class="r"></i><i class="y"></i><i class="g"></i></span>재개발 신호등</span>
+  <span class="tag">can-this-be-redeveloped</span>
+  <span class="sp"></span>
+  <button class="tbtn" id="theme">◐ 테마</button>
+</div></div>
+
+<div class="wrap">
+  <div class="intro">
+    <h1>이 재개발 물건, 사도 되나?</h1>
+    <p>물건 정보를 넣으면 <b>①이 지역이 재개발 될 수 있는지(요건)</b>와 <b>②내가 사서 입주권 자격이 되는지(승계)</b>를 근거·조문과 함께 판정합니다.</p>
+    <p class="scope">될 수 있나(요건·자격)만 판정 — 실제로 될지(조합·정치·시장)는 예측하지 않음 · 서울 조례 기준 · 참고용, 법률자문 아님</p>
+  </div>
+
+  <div class="grid">
+    <!-- INPUTS -->
+    <div class="panel">
+      <div class="panel-h"><span class="n">IN</span><h3>물건 정보</h3></div>
+      <div class="presets">
+        <button class="preset" data-p="green">예시·통과</button>
+        <button class="preset" data-p="cash">예시·현금청산</button>
+        <button class="preset" data-p="hold">예시·확인필요</button>
+      </div>
+      <div class="panel-b">
+        <fieldset>
+          <div class="leg">① 구역·건물 (재개발 될 수 있나)</div>
+          <div class="f"><label>사업유형</label>
+            <select id="type"><option value="재개발">재개발</option><option value="재건축">재건축</option></select></div>
+          <label class="chk"><input type="checkbox" id="promo">재정비촉진지구 (노후도 기준 50%)</label>
+          <label class="chk"><input type="checkbox" id="toohee" checked>투기과열지구 (지위 양도 제한 적용)</label>
+          <div class="row">
+            <div class="f"><label>구역 면적 (㎡)</label><input id="area" type="number" placeholder="비우면 미확인" value="15000"></div>
+            <div class="f"><label>지역 노후도 (%)</label><input id="nohu" type="number" placeholder="미확인" value="70"></div>
+          </div>
+          <div class="hint" style="margin:-4px 0 8px;color:var(--ink-3);font-size:11px">선택요건 — 아래 중 하나만 충족하면 됨 (비우면 미확인)</div>
+          <div class="row">
+            <div class="f"><label>과소필지 (%) ≥40</label><input id="gwaso" type="number" placeholder="미확인" value="45"></div>
+            <div class="f"><label>주택접도율 (%) ≤40</label><input id="jeopdo" type="number" placeholder="미확인"></div>
+          </div>
+          <div class="row">
+            <div class="f"><label>호수밀도 (호/ha) ≥60</label><input id="hosu" type="number" placeholder="미확인"></div>
+            <div class="f"><label>노후연면적 (%) ≥60</label><input id="nohuA" type="number" placeholder="미확인"></div>
+          </div>
+          <div class="row">
+            <div class="f"><label>내 건물 준공연도</label><input id="built" type="number" placeholder="미확인" value="1990"></div>
+            <div class="f"><label>구조</label><select id="struct"><option value="RC공동주택">RC 공동주택</option><option value="기타">기타</option></select></div>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <div class="leg">② 매수인 (입주권 자격 · 매도인 기준)</div>
+          <div class="row">
+            <div class="f"><label>매도인 취득연도</label><input id="own" type="number" placeholder="미확인" value="2011"></div>
+            <div class="f"><label>매도인 거주 시작연도</label><input id="reside" type="number" placeholder="미확인" value="2013"><span class="hint">배우자·직계존비속 합산 반영</span></div>
+          </div>
+          <div class="f"><label>조합명부 등재연도 <span class="hint">(취득연도와 다르면 자료 충돌)</span></label><input id="myeong" type="number" placeholder="미확인(생략 가능)"></div>
+          <div class="leg" style="margin-top:12px">재건축 단계 (재건축일 때만)</div>
+          <div class="row">
+            <div class="f"><label>조합설립인가 연도</label><input id="johap" type="number" placeholder="미확인"></div>
+            <div class="f"><label>사업시행인가 연도</label><input id="saeop" type="number" placeholder="없으면 비움"></div>
+          </div>
+          <div class="f"><label>착공 연도</label><input id="chak" type="number" placeholder="없으면 비움"></div>
+          <div class="leg" style="margin-top:12px">특수정황 (해당 시)</div>
+          <div class="chips" id="claims">
+            <button class="chip" data-c="sedae" aria-pressed="false">세대원 전원 이전</button>
+            <button class="chip" data-c="sangsok" aria-pressed="false">상속</button>
+            <button class="chip" data-c="haewoe" aria-pressed="false">해외이주</button>
+            <button class="chip" data-c="bulgapi" aria-pressed="false">경매·공매 등</button>
+          </div>
+          <div class="hint" style="font-size:11px;color:var(--ink-3)">구두 주장만으론 확정 불가 → 증빙 요청으로 처리 (근거등급 T)</div>
+        </fieldset>
+      </div>
+    </div>
+
+    <!-- VERDICT -->
+    <div class="verdict">
+      <div class="combo">
+        <div class="signal" id="sigCombo"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+        <div class="combo-t">
+          <div class="k">새 집을 받을 수 있나 (요건 AND 자격)</div>
+          <div class="v" id="comboV">—</div>
+          <div class="s" id="comboS"></div>
+        </div>
+      </div>
+      <div class="mods">
+        <div class="mod">
+          <div class="mod-h"><div class="t">① 재개발 될 수 있나<small>정비구역 지정 요건</small></div><span class="pill" id="pillA">—</span></div>
+          <div class="reqs" id="reqsA"></div>
+        </div>
+        <div class="mod">
+          <div class="mod-h"><div class="t">② 입주권 자격 되나<small>조합원 지위 승계 §39②/§37</small></div><span class="pill" id="pillC">—</span></div>
+          <div class="reqs" id="reqsC"></div>
+        </div>
+      </div>
+      <div id="askBox"></div>
+      <div class="foot">
+        <b>근거등급</b> P0 조문·조례 › P1 원본문서(등기부·대장·초본) › S1 기관게시(정보몽땅) › T 당사자진술 — <b>최약 링크로 하향, T 단독은 MET 불가.</b><br>
+        <b>미확인은 실패가 아니라 결과</b>입니다 — 값이 없으면 추측하지 않고 "확인필요"로 두고, 필요한 서류를 알려줍니다. 판정은 코드가 하고, 기준은 서울시 도시정비조례·도시정비법에서만 가져옵니다.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+var BASE=2026;
+var $=function(id){return document.getElementById(id)};
+function num(id){var v=$(id).value.trim();return v===""?null:parseFloat(v)}
+function pct(id){var v=num(id);return v===null?null:v/100}
+
+/* ---------- A. 요건 ---------- */
+function evalCriteria(){
+  var type=$("type").value, promo=$("promo").checked;
+  var area=num("area"), nohu=pct("nohu");
+  var sel={gwaso:pct("gwaso"),jeopdo:pct("jeopdo"),hosu:num("hosu"),nohuA:pct("nohuA")};
+  var built=num("built"), struct=$("struct").value;
+  var R=[];
+  function push(name,law,verdict,val,ev,kind){R.push({name:name,law:law,verdict:verdict,val:val,ev:ev,kind:kind||"필수"})}
+
+  if(type==="재건축"){
+    push("정비구역 지정 요건","재건축은 안전진단(D/E) 트리 — 별도","NA","해당없음","",'필수');
+    return {overall:"확인",reqs:R,ask:["재건축 안전진단 결과(구조안전 D/E 등급)"]};
+  }
+  // 면적
+  if(area===null) push("정비구역 면적","서울 조례 1만㎡ 이상","INSUFFICIENT",null,"정비계획 자료(구역 면적) 필요");
+  else if(area>=10000) push("정비구역 면적","1만㎡ 이상","MET",area.toLocaleString()+"㎡ ≥ 1만","");
+  else if(area>=5000) push("정비구역 면적","5천~1만㎡ 심의 완화","MET",area.toLocaleString()+"㎡ (심의)","");
+  else push("정비구역 면적","1만㎡ 미만","NOT_MET",area.toLocaleString()+"㎡ < 5천","");
+  // 노후도
+  var need=promo?0.5:0.6;
+  if(nohu===null) push("지역 노후도","노후·불량건축물 비율","INSUFFICIENT",null,"정보몽땅 노후도 현황 필요");
+  else push("지역 노후도","기준 "+(need*100)+"%",nohu>=need?"MET":"NOT_MET",(nohu*100).toFixed(0)+"% / "+(need*100)+"%","");
+  // 선택
+  var selSpecs=[["과소필지",sel.gwaso,0.4,">=","%","과소필지 비율"],["주택접도율",sel.jeopdo,0.4,"<=","%","주택접도율"],
+    ["호수밀도",sel.hosu,60,">=","호","호수밀도"],["노후연면적",sel.nohuA,0.6,">=","%","노후 연면적 비율"]];
+  var selReqs=[];
+  selSpecs.forEach(function(s){
+    var name=s[0],v=s[1],thr=s[2],op=s[3],u=s[4],miss=s[5];
+    if(v===null){selReqs.push({name:name,law:"선택요건",verdict:"INSUFFICIENT",val:null,ev:"정비계획 자료("+miss+")",kind:"선택"});return}
+    var ok=op===">="?v>=thr:v<=thr;
+    var vs=u==="%"?(v*100).toFixed(0)+"% "+op+" "+(thr*100)+"%":v+"호 "+op+" "+thr;
+    selReqs.push({name:name,law:"선택요건",verdict:ok?"MET":"NOT_MET",val:vs+(ok?" ✓":" ✗"),ev:"",kind:"선택"});
+  });
+  // 내 건물
+  if(built!==null){var yr=BASE-built,nd=struct==="RC공동주택"?30:30;
+    R.push({name:"내 건물 노후(경과연수)",law:"참고",verdict:yr>=nd?"MET":"NOT_MET",val:"준공 "+built+" → "+yr+"년/"+nd+"년",ev:"",kind:"참고"});}
+  // 종합
+  var ess=R.filter(function(r){return r.kind==="필수"});
+  var overall,ask=[];
+  var selMet=selReqs.some(function(r){return r.verdict==="MET"});
+  if(ess.some(function(r){return r.verdict==="NOT_MET"})) overall="미달";
+  else if(ess.some(function(r){return r.verdict==="INSUFFICIENT"})) overall="확인";
+  else { overall=selMet?"가능":(selReqs.some(function(r){return r.verdict==="INSUFFICIENT"})?"확인":"미달"); }
+  // ask 자료(필수 INSUFFICIENT + 선택 미충족 시 선택)
+  R.forEach(function(r){if(r.verdict==="INSUFFICIENT"&&r.ev) ask.push(r.ev)});
+  if(!selMet) selReqs.forEach(function(r){if(r.verdict==="INSUFFICIENT") ask.push(r.ev)});
+  var reqs=ess.concat(selReqs).concat(R.filter(function(r){return r.kind==="참고"}));
+  return {overall:overall,reqs:reqs,ask:ask};
+}
+
+/* ---------- C. 자격 (조합원 지위 승계) ---------- */
+function evalSucc(){
+  if(!$("toohee").checked)
+    return {overall:"가능",exs:[{name:"투기과열지구 아님",law:"제한 없음",verdict:"MET",val:"지위 양도 자유",ev:""}],ask:[]};
+  var type=$("type").value;
+  var own=num("own"), reside=num("reside"), myeong=num("myeong");
+  var johap=num("johap"), saeop=num("saeop"), chak=num("chak");
+  var claims={sedae:0,sangsok:0,haewoe:0,bulgapi:0};
+  document.querySelectorAll("#claims .chip").forEach(function(c){claims[c.dataset.c]=c.getAttribute("aria-pressed")==="true"});
+  var E=[],ask=[];
+
+  // ex1 장기보유
+  var e1=[];
+  if(own===null) e1.push({v:"INSUFFICIENT",t:"소유 10년",m:"매도인 등기부(취득일)"});
+  else if(myeong!==null&&myeong!==own) e1.push({v:"CONFLICT",t:"소유기간",m:"등기부 취득("+own+") ≠ 조합명부("+myeong+") — 전문가 확인",val:"충돌"});
+  else e1.push({v:(BASE-own>=10)?"MET":"NOT_MET",t:"소유 10년",val:"취득 "+own+" → "+(BASE-own)+"년"});
+  if(reside===null) e1.push({v:"INSUFFICIENT",t:"거주 5년(합산)",m:"매도인 주민등록초본(주소변동)"});
+  else e1.push({v:(BASE-reside>=5)?"MET":"NOT_MET",t:"거주 5년",val:"거주개시 "+reside+" → "+(BASE-reside)+"년"});
+  E.push(andEx("ex1 장기보유(10년 소유·5년 거주)","법 §39②4호·령 §37①",e1));
+
+  // ex2/3/4/8 특수정황
+  E.push(claimEx("ex2 세대원 전원 이전","법 §39②1호",claims.sedae,"전원 전출 증빙"));
+  E.push(claimEx("ex3 상속주택 전원 이전","법 §39②2호",claims.sangsok,"가족관계·상속 서류"));
+  E.push(claimEx("ex4 해외이주/2년+","법 §39②3호",claims.haewoe,"해외이주신고·출입국"));
+  var e8=claimEx("ex8 불가피(경매·공매 등)","령 §37③ (원문 미검증)",claims.bulgapi,"경매개시·판결문 등");e8.warn=true;E.push(e8);
+
+  // ex5/6/7 재건축
+  if(type==="재건축"){
+    E.push(rebuild("ex5 조합설립+3년 내 사업시행인가 미신청","령 §37②",johap,"조합설립인가",saeop,own));
+    E.push(rebuild("ex6 사업시행인가+3년 내 미착공","령 §37②",saeop,"사업시행인가",chak,own));
+    E.push(rebuild("ex7 착공+3년 내 미준공","령 §37②",chak,"착공",null,own));
+  } else {
+    ["ex5 사업시행인가 지연","ex6 착공 지연","ex7 준공 지연"].forEach(function(n){
+      E.push({name:n+" (재건축 전용)",law:"령 §37②",verdict:"NA",val:"재개발 해당없음",ev:""})});
+  }
+  // 종합 OR
+  var pool=E.filter(function(e){return e.verdict!=="NA"});
+  var overall = pool.some(function(e){return e.verdict==="MET"})?"가능"
+    : pool.some(function(e){return e.verdict==="INSUFFICIENT"||e.verdict==="CONFLICT"})?"확인":"불가";
+  E.forEach(function(e){if(e.verdict==="INSUFFICIENT"&&e.miss) ask.push(e.miss)});
+  return {overall:overall,exs:E,ask:ask};
+}
+function andEx(name,law,parts){
+  var vs=parts.map(function(p){return p.v});
+  var v=vs.indexOf("NOT_MET")>=0?"NOT_MET":vs.indexOf("CONFLICT")>=0?"CONFLICT":vs.indexOf("INSUFFICIENT")>=0?"INSUFFICIENT":"MET";
+  var miss=parts.filter(function(p){return p.v==="INSUFFICIENT"}).map(function(p){return p.m})[0];
+  var ev=parts.map(function(p){return p.t+": "+(p.val||(p.v==="INSUFFICIENT"?"자료없음":p.v==="CONFLICT"?p.m:"")) }).join(" · ");
+  return {name:name,law:law,verdict:v,val:andLabel(v),ev:ev,miss:miss};
+}
+function andLabel(v){return v==="MET"?"요건 충족":v==="NOT_MET"?"불충족":v==="CONFLICT"?"자료 충돌":"자료 부족"}
+function claimEx(name,law,on,proof){
+  if(!on) return {name:name,law:law,verdict:"NOT_MET",val:"해당 정황 없음",ev:""};
+  return {name:name,law:law,verdict:"INSUFFICIENT",val:"주장(구두)",ev:"T 진술만으론 확정 불가",miss:proof};
+}
+function rebuild(name,law,anchor,anchorName,next,own){
+  if(anchor===null) return {name:name,law:law,verdict:"INSUFFICIENT",val:null,ev:anchorName+" 미확인",miss:"정보몽땅 "+anchorName+" 이력"};
+  var passed3=(BASE-anchor)>=3, nextExists=(next!==null);
+  var a1=(passed3&&!nextExists);
+  var ownOk=(own!==null&&(BASE-own)>=3);
+  var v = own===null?"INSUFFICIENT" : (a1&&ownOk)?"MET" : "NOT_MET";
+  var ev=anchorName+" "+anchor+" · 후속 "+(nextExists?next:"없음")+" · 소유 "+(own!==null?(BASE-own)+"년":"?");
+  return {name:name,law:law,verdict:v,val:andLabel(v),ev:ev,miss:own===null?"매도인 등기부(취득일)":null};
+}
+
+/* ---------- render ---------- */
+var LABEL={"가능":["go","g"],"불가":["no","r"],"미달":["no","r"],"확인":["hold","y"]};
+var TXT={"가능":{A:"재개발 될 수 있음",C:"입주권 승계 가능"},"불가":{C:"현금청산 대상"},"미달":{A:"요건 미달"},"확인":{A:"확인 필요",C:"확인 필요"}};
+function reqRow(r){
+  var v=r.val?'<span class="req-val">'+esc(r.val)+'</span>':'';
+  var law=r.law?'<span class="law">'+esc(r.law)+'</span>':'';
+  var ev=r.ev?'<div class="req-ev">'+ (r.miss&&r.verdict==="INSUFFICIENT"?'📄 <b>'+esc(r.miss)+'</b> — ':'') + esc(r.ev)+'</div>':
+    (r.miss&&r.verdict==="INSUFFICIENT"?'<div class="req-ev">📄 <b>'+esc(r.miss)+'</b> 필요</div>':'');
+  return '<div class="req'+(r.verdict==="NA"?' na-row':'')+'"><div class="req-top"><span class="dot '+r.verdict+'"></span>'+
+    '<span class="req-name">'+esc(r.name)+law+'</span>'+v+'</div>'+ev+'</div>';
+}
+function esc(s){return String(s).replace(/[&<>]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;"}[c]})}
+function setSignal(el,color){el.querySelectorAll("i").forEach(function(i){i.classList.remove("on")});
+  el.querySelector("i."+color).classList.add("on")}
+
+function run(){
+  var A=evalCriteria(), C=evalSucc();
+  // module A
+  $("reqsA").innerHTML=A.reqs.map(reqRow).join("");
+  var la=LABEL[A.overall]; $("pillA").className="pill "+la[0]; $("pillA").textContent=TXT[A.overall].A||A.overall;
+  // module C
+  $("reqsC").innerHTML=C.exs.map(reqRow).join("");
+  var lc=LABEL[C.overall]; $("pillC").className="pill "+lc[0]; $("pillC").textContent=TXT[C.overall].C||C.overall;
+  // combined
+  var aGood=A.overall==="가능", aBad=A.overall==="미달", cGood=C.overall==="가능", cBad=(C.overall==="불가");
+  var combo,cls,sig,sub;
+  if(aBad||cBad){combo="받기 어려움";cls="no";sig="r";
+    sub=aBad?"재개발 요건 미달":"현금청산 대상(입주권 승계 불가)";}
+  else if(aGood&&cGood){combo="받을 수 있음";cls="go";sig="g";sub="요건·자격 둘 다 충족 (실제 진행은 별개)";}
+  else {combo="확인 필요";cls="hold";sig="y";sub="한쪽 이상 자료 보완 필요 — 아래 요청자료 참고";}
+  $("comboV").className="v "+cls; $("comboV").textContent=combo; $("comboS").textContent=sub;
+  setSignal($("sigCombo"),sig);
+  // ask
+  var ask=[];A.ask.concat(C.ask).forEach(function(x){if(x&&ask.indexOf(x)<0)ask.push(x)});
+  $("askBox").innerHTML = ask.length? '<div class="ask"><div class="h">📄 이 자료만 주시면 판정이 확정됩니다</div><ul>'+
+    ask.map(function(x){return "<li>"+esc(x)+"</li>"}).join("")+'</ul></div>' : "";
+}
+
+/* presets */
+var PRE={
+  green:{type:"재개발",promo:0,toohee:1,area:15000,nohu:70,gwaso:45,jeopdo:"",hosu:"",nohuA:"",built:1990,struct:"RC공동주택",own:2011,reside:2013,myeong:"",johap:"",saeop:"",chak:"",claims:[]},
+  cash:{type:"재개발",promo:0,toohee:1,area:15000,nohu:70,gwaso:45,jeopdo:"",hosu:"",nohuA:"",built:1990,struct:"RC공동주택",own:2018,reside:2022,myeong:"",johap:"",saeop:"",chak:"",claims:[]},
+  hold:{type:"재개발",promo:0,toohee:1,area:15000,nohu:70,gwaso:"",jeopdo:"",hosu:"",nohuA:"",built:1990,struct:"RC공동주택",own:2011,reside:"",myeong:"",johap:"",saeop:"",chak:"",claims:[]}
+};
+function applyPreset(p){var d=PRE[p];if(!d)return;
+  ["type","struct"].forEach(function(k){$(k).value=d[k]});
+  ["promo","toohee"].forEach(function(k){$(k).checked=!!d[k]});
+  ["area","nohu","gwaso","jeopdo","hosu","nohuA","built","own","reside","myeong","johap","saeop","chak"].forEach(function(k){$(k).value=d[k]});
+  document.querySelectorAll("#claims .chip").forEach(function(c){c.setAttribute("aria-pressed",d.claims.indexOf(c.dataset.c)>=0?"true":"false")});
+  run();
+}
+
+/* wire */
+document.querySelectorAll("input,select").forEach(function(el){el.addEventListener("input",run)});
+document.querySelectorAll("#claims .chip").forEach(function(c){c.addEventListener("click",function(){
+  c.setAttribute("aria-pressed",c.getAttribute("aria-pressed")==="true"?"false":"true");run()})});
+document.querySelectorAll(".preset").forEach(function(b){b.addEventListener("click",function(){applyPreset(b.dataset.p)})});
+$("theme").addEventListener("click",function(){
+  var r=document.documentElement, cur=r.getAttribute("data-theme");
+  var next=cur==="dark"?"light":cur==="light"?"dark":(matchMedia("(prefers-color-scheme:dark)").matches?"light":"dark");
+  r.setAttribute("data-theme",next);
+});
+run();
+</script>
