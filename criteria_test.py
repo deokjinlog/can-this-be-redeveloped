@@ -1,4 +1,4 @@
-"""요건 모듈(A) 케이스 — '재개발 될 수 있나'."""
+"""요건 모듈(A) 케이스 — '재개발 될 수 있나' (서울 조례 검증값)."""
 from datetime import date
 from criteria_engine import Building, Area, Fact, Grade, evaluate, render
 
@@ -6,23 +6,32 @@ def daejang(d, span): return Fact(d, Grade.P1, "건축물대장", span)
 def gosi(r, span):    return Fact(r, Grade.S1, "정보몽땅 노후도", span)
 def plan(v, span):    return Fact(v, Grade.P1, "정비계획 자료", span)
 
+RC90 = Building(준공일=daejang(date(1990, 5, 1), "사용승인 1990-05-01"), 구조="RC공동주택")
+
 cases = []
 
-# ① 노후도 70% + 과소필지 45% + 내 건물 RC 1990준공 → 노후도 OK, 선택은 조례 미검증 → 확인필요
-cases.append(("①노후도70·과소45", "확인 필요",
-    Building(준공일=daejang(date(1990, 5, 1), "사용승인 1990-05-01"), 구조="RC공동주택"),
-    Area(사업유형="재개발", 지역="서울", 노후불량비율=gosi(0.70, "노후도 70%"),
+# ① 필수(면적·노후도70%) + 선택(과소필지45%) 충족 → 될 수 있음
+cases.append(("①노후70·과소45·면적OK", "재개발 될 수 있음", RC90,
+    Area(노후불량비율=gosi(0.70, "노후도 70%"), 면적=plan(15000, "구역 15,000㎡"),
          과소필지비율=plan(0.45, "과소필지 45%"))))
 
-# ② 지역 노후도 40% (<60%) → 필수요건 미달 → 요건 미달
-cases.append(("②노후도40", "요건 미달",
-    Building(준공일=daejang(date(2000, 1, 1), "사용승인 2000-01-01"), 구조="RC공동주택"),
-    Area(사업유형="재개발", 지역="서울", 노후불량비율=gosi(0.40, "노후도 40%"))))
+# ② 노후도 40%(<60%) → 필수 미달 → 요건 미달
+cases.append(("②노후40", "요건 미달", RC90,
+    Area(노후불량비율=gosi(0.40, "노후도 40%"), 면적=plan(15000, "구역 15,000㎡"))))
 
-# ③ 노후도 자료 없음 → 확인필요 (정보몽땅 노후도 필요)
-cases.append(("③노후도미상", "확인 필요",
-    Building(준공일=daejang(date(1988, 3, 1), "사용승인 1988-03-01"), 구조="RC공동주택"),
-    Area(사업유형="재개발", 지역="서울")))
+# ③ 노후도 자료 없음 → 확인필요
+cases.append(("③노후미상", "확인 필요", RC90,
+    Area(면적=plan(15000, "구역 15,000㎡"))))
+
+# ④ 필수는 충족(노후65·면적OK)인데 선택 4종 전부 미달 → 요건 미달
+cases.append(("④선택전부미달", "요건 미달", RC90,
+    Area(노후불량비율=gosi(0.65, "노후도 65%"), 면적=plan(15000, "구역 15,000㎡"),
+         과소필지비율=plan(0.30, "과소필지 30%"), 접도율=plan(0.50, "주택접도율 50%"),
+         호수밀도=plan(40, "호수밀도 40호/ha"), 노후연면적비율=plan(0.50, "노후연면적 50%"))))
+
+# ⑤ 노후도 충족인데 면적 미상 → 확인필요 (필수 자료 보완)
+cases.append(("⑤면적미상", "확인 필요", RC90,
+    Area(노후불량비율=gosi(0.65, "노후도 65%"), 과소필지비율=plan(0.45, "과소필지 45%"))))
 
 passed = 0
 for name, expect, b, a in cases:
@@ -36,11 +45,11 @@ for name, expect, b, a in cases:
 print(f"\n{passed}/{len(cases)} 통과\n")
 
 print("=" * 60)
-print("샘플 — ① 노후도 충족·선택요건 미검증 → 확인필요")
+print("샘플 — ① 재개발 될 수 있음 (필수+선택 충족)")
 print("=" * 60)
 print(render(evaluate(cases[0][2], cases[0][3])))
 
 print("=" * 60)
-print("샘플 — ② 지역 노후도 미달 → 요건 미달(선행 필수)")
+print("샘플 — ④ 요건 미달 (선택 4종 전부 미달)")
 print("=" * 60)
-print(render(evaluate(cases[1][2], cases[1][3])))
+print(render(evaluate(cases[3][2], cases[3][3])))
