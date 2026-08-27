@@ -22,7 +22,21 @@ from datetime import date
 
 from criteria_engine import Building, Area, Fact, Grade, evaluate, render
 
-BLD_TITLE_URL = "http://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo"
+BLD_TITLE_URL = "https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo"
+
+
+def _load_env():
+    """.env(gitignore) 에서 키 로드. 커밋 금지."""
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if os.path.exists(p):
+        for line in open(p, encoding="utf-8"):
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip())
+
+
+_load_env()
 
 
 # ── 응답 필드 매핑 (라이브에서 어긋나면 여기만 수정) ──
@@ -43,32 +57,37 @@ def _get(item, key):
 
 
 def fetch_title(sigungu, bjdong, bun, ji, mock=False) -> dict:
-    """건축물대장 표제부 조회 → 원시 dict."""
+    """건축물대장 표제부 조회(JSON) → 원시 dict. 여러 동이면 첫 동."""
     if mock:
-        return {"useAprDay": "19900501", "struct": "철근콘크리트구조",
-                "purpose": "공동주택(아파트)", "households": "480",
-                "totArea": "52000.5", "grndFlr": "15", "bldNm": "○○아파트"}
+        return {k: v for k, v in zip(FIELD, [
+            "19900501", "철근콘크리트구조", "공동주택(아파트)", "480", "52000.5", "15", "○○아파트"])}
     key = os.environ.get("DATA_GO_KR_KEY")
     if not key:
-        raise SystemExit("환경변수 DATA_GO_KR_KEY 없음. .env 에 넣거나 --mock 로 실행.")
-    params = {
-        "serviceKey": key, "sigunguCd": sigungu, "bjdongCd": bjdong,
-        "bun": str(bun).zfill(4), "ji": str(ji).zfill(4),
-        "numOfRows": "10", "pageNo": "1",
-    }
-    url = BLD_TITLE_URL + "?" + urllib.parse.urlencode(params, safe="%")
-    with urllib.request.urlopen(url, timeout=15) as resp:
-        body = resp.read().decode("utf-8", "ignore")
-    root = ET.fromstring(body)
-    # 에러 응답 방어
-    hdr = root.find(".//resultCode")
-    if hdr is not None and hdr.text not in ("00", "0", None):
-        msg = root.find(".//resultMsg")
-        raise SystemExit(f"API 오류: {hdr.text} {msg.text if msg is not None else ''}")
-    item = root.find(".//item")
-    if item is None:
-        raise SystemExit("표제부 결과 없음 (코드/지번 확인).")
-    return {k: _get(item, k) for k in FIELD}
+        raise SystemExit("DATA_GO_KR_KEY 없음. .env 에 넣거나 --mock 로 실행.")
+    # 인코딩키(%2B 등)는 이미 URL-safe → 그대로 붙임(이중 인코딩 방지)
+    q = (f"serviceKey={key}&sigunguCd={sigungu}&bjdongCd={bjdong}"
+         f"&bun={str(bun).zfill(4)}&ji={str(ji).zfill(4)}"
+         f"&numOfRows=100&pageNo=1&_type=json")
+    with urllib.request.urlopen(BLD_TITLE_URL + "?" + q, timeout=20) as resp:
+        data = json.loads(resp.read().decode("utf-8", "ignore"))
+    rb = data.get("response", {}) or {}
+    hdr = rb.get("header", {}) or {}
+    if str(hdr.get("resultCode")) not in ("00", "0", "None"):
+        raise SystemExit(f"API 오류: {hdr.get('resultCode')} {hdr.get('resultMsg')}")
+    items = (rb.get("body", {}) or {}).get("items", {}) or {}
+    item = items.get("item") if isinstance(items, dict) else items
+    if isinstance(item, dict):
+        item = [item]
+    if not item:
+        raise SystemExit("표제부 결과 없음 (법정동코드/지번 확인).")
+    # 한 지번에 여러 동 → 주거동(공동주택/아파트) 우선, 없으면 연면적 최대
+    def is_resi(it): return any(k in (it.get(FIELD["purpose"]) or "") for k in ("공동주택", "아파트", "주택"))
+    resi = [it for it in item if is_resi(it)]
+    pool = resi if resi else item
+    chosen = max(pool, key=lambda it: float(it.get(FIELD["totArea"]) or 0))
+    out = {k: chosen.get(FIELD[k]) for k in FIELD}
+    out["_동수"] = len(item)
+    return out
 
 
 def to_building(raw: dict, asof: str) -> Building:
