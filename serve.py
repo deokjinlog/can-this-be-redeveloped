@@ -15,11 +15,64 @@ import urllib.parse
 from http.server import SimpleHTTPRequestHandler
 from socketserver import ThreadingTCPServer
 
+import aging as AG
+from criteria_engine import Cfg
 from gather import fetch_title, _load_env
 
 _load_env()
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("PORT", "8000"))
+
+
+# ── 노후도 전수집계 (표제부 CSV) — 최초 요청 때 1회 로딩 후 캐시 ──
+_AG_CACHE: dict = {}
+
+
+def _aging_buckets(by: str):
+    if "bldgs" not in _AG_CACHE:
+        _AG_CACHE["bldgs"] = AG.load()          # 없으면 SystemExit
+        _AG_CACHE["region"] = AG.REGION
+    if by not in _AG_CACHE:
+        _AG_CACHE[by] = AG.aggregate(_AG_CACHE["bldgs"], by)
+    return _AG_CACHE[by]
+
+
+def _ag_row(a) -> dict:
+    return {"key": a.key, "label": a.label, "unit": a.unit, "total": a.total,
+            "old": a.old, "unknown": a.unknown,
+            "lo": round(a.lo, 4), "hi": round(a.hi, 4),
+            "area_lo": round(a.area_lo, 4), "area_hi": round(a.area_hi, 4),
+            "연면적합": round(a.연면적합), "필지수": a.필지수,
+            "과소필지": a.과소필지, "필지면적미상": a.필지면적미상,
+            "verdict": a.verdict(Cfg.REDEV_RATIO),
+            "by_decade": a.by_decade, "by_struct": a.by_struct}
+
+
+def _aging_payload(q: dict) -> dict:
+    by = (q.get("by", ["road"])[0] or "road")
+    if by not in ("dong", "road", "bun"):
+        return {"ok": False, "error": "by 는 dong|road|bun"}
+    buckets = _aging_buckets(by)
+    key = (q.get("key", [""])[0] or "").strip()
+    term = (q.get("q", [""])[0] or "").strip()
+    top = int(q.get("top", ["12"])[0] or 12)
+    min_total = int(q.get("min", ["10"])[0] or 10)
+
+    base = {"ok": True, "by": by, "region": _AG_CACHE.get("region", ""),
+            "need": Cfg.REDEV_RATIO, "need_area": Cfg.NOHU_AREA_RATIO,
+            "기준": "표준30", "출처": AG.SRC_DOC, "기준일": AG._BASE.isoformat()}
+    if key:
+        a = buckets.get(key)
+        if a is None:
+            return {"ok": False, "error": f"키 {key} 없음"}
+        return {**base, "hit": _ag_row(a)}
+    items = [a for a in buckets.values() if a.key != "미상"]
+    if term:
+        items = [a for a in items if term in a.label or term == a.key]
+    else:
+        items = [a for a in items if a.total >= min_total]
+    items.sort(key=lambda a: (-a.lo, -a.total))
+    return {**base, "list": [_ag_row(a) for a in items[:top]], "matched": len(items)}
 
 
 def _building_payload(raw: dict) -> dict:
@@ -57,6 +110,14 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e:
                 self._json({"ok": False, "error": type(e).__name__ + ": " + str(e)}, 200)
             return
+        if parts.path == "/api/aging":
+            try:
+                self._json(_aging_payload(urllib.parse.parse_qs(parts.query)))
+            except SystemExit as e:
+                self._json({"ok": False, "error": str(e)}, 200)
+            except Exception as e:
+                self._json({"ok": False, "error": type(e).__name__ + ": " + str(e)}, 200)
+            return
         if parts.path in ("/", ""):
             self.path = "/web/index.html"
         return super().do_GET()
@@ -67,7 +128,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     print(f"▶ 재개발 신호등 로컬 서버: http://localhost:{PORT}")
-    print("  (건축물대장 자동채움 활성 · Ctrl+C 종료)")
+    print("  (건축물대장 자동채움 + 표제부 전수 노후도 활성 · Ctrl+C 종료)")
     with ThreadingTCPServer(("127.0.0.1", PORT), Handler) as httpd:
         try:
             httpd.serve_forever()

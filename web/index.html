@@ -109,6 +109,16 @@ fieldset{border:none;margin:0;padding:0}
 .af-row button{font-family:var(--mono);font-size:12px;padding:6px 11px;border:1px solid var(--accent);background:var(--accent);color:var(--ground);border-radius:4px;white-space:nowrap;font-weight:600}
 .af-row button:hover{opacity:.9}
 .af-msg{font-size:11px;color:var(--ink-2);margin-top:7px;min-height:14px;font-family:var(--mono);line-height:1.5}
+.ag-row{grid-template-columns:.85fr 1.7fr auto}
+.ag-row select{font-family:var(--mono);font-size:12px;padding:6px 7px;border:1px solid var(--line-2);border-radius:4px;background:var(--surface);color:var(--ink);width:100%;min-width:0}
+.ag-list{margin-top:8px;display:none;flex-direction:column;gap:3px;max-height:196px;overflow-y:auto}
+.ag-list.on{display:flex}
+.ag-item{display:grid;grid-template-columns:1fr auto 58px;gap:8px;align-items:center;font-family:var(--mono);font-size:11.5px;padding:5px 7px;border:1px solid var(--line-2);border-radius:4px;background:var(--surface);color:var(--ink);cursor:pointer;text-align:left;width:100%}
+.ag-item:hover{border-color:var(--accent)}
+.ag-item .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ag-item .cnt{color:var(--ink-3);font-size:10.5px}
+.ag-item .rt{font-weight:600;text-align:right}
+.ag-item .rt.MET{color:var(--go)} .ag-item .rt.NOT_MET{color:var(--no)} .ag-item .rt.확인필요{color:var(--hold)}
 /* verdict */
 .verdict{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface);box-shadow:var(--shadow)}
 .combo{padding:18px 20px;display:flex;align-items:center;gap:16px;border-bottom:1px solid var(--line)}
@@ -200,6 +210,16 @@ a{color:var(--accent)}
             <select id="type"><option value="재개발">재개발</option><option value="재건축">재건축</option></select></div>
           <label class="chk"><input type="checkbox" id="promo">재정비촉진지구 (노후도 기준 50%)</label>
           <label class="chk"><input type="checkbox" id="toohee" checked>투기과열지구 (지위 양도 제한 적용)</label>
+          <div class="autofill">
+            <div class="af-h">📊 동네 노후도 전수집계 <span>· 건축물대장 표제부 CSV (구역 경계 아님)</span></div>
+            <div class="af-row ag-row">
+              <select id="ag-by"><option value="road">도로(길)</option><option value="bun">지번블록</option><option value="dong">법정동 전체</option></select>
+              <input id="ag-q" placeholder="예: 양지6길 (비우면 노후율 상위)">
+              <button id="ag-btn" type="button">집계</button>
+            </div>
+            <div class="ag-list" id="ag-list"></div>
+            <div class="af-msg" id="ag-msg">길 이름을 넣거나 그냥 눌러 노후율 상위 구간을 보세요 — 클릭하면 아래 노후도 칸이 채워집니다.</div>
+          </div>
           <div class="row">
             <div class="f"><label>구역 면적 (㎡)</label><input id="area" type="number" placeholder="비우면 미확인" value="15000"></div>
             <div class="f"><label>지역 노후도 (%)</label><input id="nohu" type="number" placeholder="미확인" value="70"></div>
@@ -470,5 +490,39 @@ $("af-btn").addEventListener("click",function(){
     $("af-msg").textContent="⚠️ 로컬 서버 없음 — 터미널에서 python serve.py 실행 후 localhost:8000 에서 써야 자동채움 됩니다.";
   });
 });
+/* 동네 노후도 전수집계 — serve.py /api/aging */
+function agPct(x){return (x*100).toFixed(x>=0.995?0:1)+"%"}
+function agRender(d){
+  var box=$("ag-list"), rows=d.list||(d.hit?[d.hit]:[]);
+  if(!rows.length){box.className="ag-list";box.innerHTML="";$("ag-msg").textContent="매칭 없음 — 다른 이름으로 찾아보세요.";return}
+  box.innerHTML = rows.map(function(r){
+    var rng = r.unknown ? agPct(r.lo)+"~"+agPct(r.hi) : agPct(r.lo);
+    return '<button type="button" class="ag-item" data-lo="'+r.lo+'" data-alo="'+r.area_lo+'" data-hi="'+r.hi+'" data-u="'+r.unknown+'" data-l="'+esc(r.label)+'">'+
+      '<span class="nm">'+esc(r.label)+'</span><span class="cnt">'+r.total.toLocaleString()+'동</span>'+
+      '<span class="rt '+r.verdict+'">'+rng+'</span></button>'}).join("");
+  box.className="ag-list on";
+  box.querySelectorAll(".ag-item").forEach(function(b){b.addEventListener("click",function(){
+    var lo=parseFloat(b.dataset.lo), hi=parseFloat(b.dataset.hi), alo=parseFloat(b.dataset.alo), u=parseInt(b.dataset.u,10);
+    $("nohu").value=(lo*100).toFixed(1);
+    if(alo>0) $("nohuA").value=(alo*100).toFixed(1);
+    var warn = u? " · 준공일 미상 "+u+"동은 노후로 안 셈(상한 "+agPct(hi)+")" : "";
+    $("ag-msg").textContent="✓ "+b.dataset.l+" 하한 "+agPct(lo)+" 채움"+warn+" · 대장 전수(P1)";
+    run();
+  })});
+  $("ag-msg").textContent = (d.matched||rows.length)+"개 중 "+rows.length+"개 표시 — 하나 클릭하면 채워집니다. 기준 "+agPct(d.need)+" · "+d.region;
+}
+function agFetch(){
+  var qs="by="+encodeURIComponent($("ag-by").value)+"&q="+encodeURIComponent($("ag-q").value.trim())+"&top=12&min=10";
+  $("ag-msg").textContent="집계 중…";
+  fetch("/api/aging?"+qs).then(function(r){return r.json()}).then(function(d){
+    if(!d.ok){$("ag-msg").textContent="⚠️ "+(d.error||"집계 실패");return}
+    agRender(d);
+  }).catch(function(){
+    $("ag-msg").textContent="⚠️ 로컬 서버 없음 — 터미널에서 python serve.py 실행 후 localhost:8000 에서 써야 집계됩니다.";
+  });
+}
+$("ag-btn").addEventListener("click",agFetch);
+$("ag-q").addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();agFetch()}});
+
 run();
 </script>
