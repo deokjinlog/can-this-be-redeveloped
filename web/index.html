@@ -119,6 +119,20 @@ fieldset{border:none;margin:0;padding:0}
 .ag-item .cnt{color:var(--ink-3);font-size:10.5px}
 .ag-item .rt{font-weight:600;text-align:right}
 .ag-item .rt.MET{color:var(--go)} .ag-item .rt.NOT_MET{color:var(--no)} .ag-item .rt.확인필요{color:var(--hold)}
+.addr{background:var(--accent-soft);border:1px solid var(--accent);border-radius:7px;padding:11px 12px;margin-bottom:11px}
+.addr .af-h{color:var(--accent)}
+.addr-row{display:grid;grid-template-columns:1fr auto;gap:6px}
+.addr-row input{font-size:13px;padding:8px 9px;border:1px solid var(--line-2);border-radius:5px;background:var(--surface);color:var(--ink);width:100%;min-width:0}
+.addr-row button{font-family:var(--mono);font-size:12.5px;padding:8px 14px;border:1px solid var(--accent);background:var(--accent);color:var(--ground);border-radius:5px;font-weight:600;white-space:nowrap}
+.addr-row button:hover{opacity:.9}
+.zbanner{margin-top:9px;padding:9px 11px;border-radius:6px;font-size:12px;line-height:1.55;border:1px solid}
+.zbanner.on{background:var(--go-bg);border-color:var(--go-line);color:var(--ink)}
+.zbanner.off{background:var(--inset);border-color:var(--line-2);color:var(--ink-2)}
+.zbanner b{color:var(--go)}
+.zbanner .meta{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);margin-top:3px}
+.zbanner .warn{color:var(--hold);font-size:11px;margin-top:4px}
+.prov{display:inline-block;margin-left:6px;padding:0 5px;border-radius:3px;font-size:9.5px;font-family:var(--mono);
+  background:var(--hold-bg);color:var(--hold);border:1px solid var(--hold-line);vertical-align:1px}
 /* verdict */
 .verdict{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface);box-shadow:var(--shadow)}
 .combo{padding:18px 20px;display:flex;align-items:center;gap:16px;border-bottom:1px solid var(--line)}
@@ -195,6 +209,15 @@ a{color:var(--accent)}
       <div class="panel-b">
         <fieldset>
           <div class="leg">① 구역·건물 (재개발 될 수 있나)</div>
+          <div class="addr">
+            <div class="af-h">📍 주소 한 줄로 <span>· 법정동코드·지번·좌표·정비구역·대장·노후도를 한 번에</span></div>
+            <div class="addr-row">
+              <input id="ad-q" placeholder="예: 서울 관악구 신림동 10-10" value="서울 관악구 신림동 10-10">
+              <button id="ad-btn" type="button">조회</button>
+            </div>
+            <div class="af-msg" id="ad-msg">juso 키가 있으면 라이브, 없으면 아래 코드 입력을 쓰세요.</div>
+            <div id="ad-zone"></div>
+          </div>
           <div class="autofill">
             <div class="af-h">🔌 건축물대장 자동채움 <span>· 로컬 serve.py 실행 시</span></div>
             <div class="af-row">
@@ -300,8 +323,24 @@ var $=function(id){return document.getElementById(id)};
 function num(id){var v=$(id).value.trim();return v===""?null:parseFloat(v)}
 function pct(id){var v=num(id);return v===null?null:v/100}
 
+/* 주소 조회 결과 — 지정 사실과 '대리지표' 여부를 판정 로직이 알아야 한다 */
+var ZONE=null;      /* {designated,name,kind,area,notice,promo,type} */
+var PROXY=false;    /* 노후도를 구역 경계가 아닌 단위(길·지번블록)로 쟀는가 */
+
 /* ---------- A. 요건 ---------- */
 function evalCriteria(){
+  if(ZONE&&ZONE.designated){
+    /* 이미 지정·고시됨 → 지정요건은 행정청이 이미 심사해 인정한 상태. 다시 추정하지 않는다. */
+    var Rz=[{name:"정비구역 지정 여부",law:ZONE.kind,verdict:"MET",val:ZONE.name,
+             ev:"고시도형 등재"+(ZONE.notice?" · 고시 "+ZONE.notice:""),kind:"필수"}];
+    if(ZONE.area) Rz.push({name:"정비구역 면적",law:"고시도형 실측",verdict:"MET",
+             val:Math.round(ZONE.area).toLocaleString()+"㎡"+(ZONE.area>=10000?" ≥ 1만 ✓":""),
+             ev:"서울시 의제처리구역 위치정보",kind:"필수"});
+    var bt=num("built");
+    if(bt!==null) Rz.push({name:"내 건물 노후(경과연수)",law:"참고",
+             verdict:(BASE-bt)>=30?"MET":"NOT_MET",val:"준공 "+bt+" → "+(BASE-bt)+"년/30년",ev:"",kind:"참고"});
+    return {overall:"가능",reqs:Rz,ask:[],designated:true};
+  }
   var type=$("type").value, promo=$("promo").checked;
   var area=num("area"), nohu=pct("nohu");
   var sel={gwaso:pct("gwaso"),jeopdo:pct("jeopdo"),hosu:num("hosu"),nohuA:pct("nohuA")};
@@ -321,7 +360,11 @@ function evalCriteria(){
   // 노후도
   var need=promo?0.5:0.6;
   if(nohu===null) push("지역 노후도","노후·불량건축물 비율","INSUFFICIENT",null,"정보몽땅 노후도 현황 필요");
-  else push("지역 노후도","기준 "+(need*100)+"%",nohu>=need?"MET":"NOT_MET",(nohu*100).toFixed(0)+"% / "+(need*100)+"%","");
+  else {
+    push("지역 노후도","기준 "+(need*100)+"%",nohu>=need?"MET":"NOT_MET",(nohu*100).toFixed(0)+"% / "+(need*100)+"%","");
+    if(PROXY){ var rr=R[R.length-1]; rr.provisional=true;
+      rr.ev="정비구역 경계(정비계획 자료) — 경계 안에서 다시 집계"; }
+  }
   // 선택
   var selSpecs=[["과소필지",sel.gwaso,0.4,">=","%","과소필지 비율"],["주택접도율",sel.jeopdo,0.4,"<=","%","주택접도율"],
     ["호수밀도",sel.hosu,60,">=","호","호수밀도"],["노후연면적",sel.nohuA,0.6,">=","%","노후 연면적 비율"]];
@@ -339,12 +382,14 @@ function evalCriteria(){
   // 종합
   var ess=R.filter(function(r){return r.kind==="필수"});
   var overall,ask=[];
-  var selMet=selReqs.some(function(r){return r.verdict==="MET"});
-  if(ess.some(function(r){return r.verdict==="NOT_MET"})) overall="미달";
-  else if(ess.some(function(r){return r.verdict==="INSUFFICIENT"})) overall="확인";
-  else { overall=selMet?"가능":(selReqs.some(function(r){return r.verdict==="INSUFFICIENT"})?"확인":"미달"); }
+  /* 잠정(구역 경계가 아닌 범위로 잰 값)은 충족·미달 어느 쪽으로도 확정하지 않는다 */
+  function eff(r){return r.provisional?"INSUFFICIENT":r.verdict}
+  var selMet=selReqs.some(function(r){return eff(r)==="MET"});
+  if(ess.some(function(r){return eff(r)==="NOT_MET"})) overall="미달";
+  else if(ess.some(function(r){return eff(r)==="INSUFFICIENT"})) overall="확인";
+  else { overall=selMet?"가능":(selReqs.some(function(r){return eff(r)==="INSUFFICIENT"})?"확인":"미달"); }
   // ask 자료(필수 INSUFFICIENT + 선택 미충족 시 선택)
-  R.forEach(function(r){if(r.verdict==="INSUFFICIENT"&&r.ev) ask.push(r.ev)});
+  R.forEach(function(r){if((r.verdict==="INSUFFICIENT"||r.provisional)&&r.ev) ask.push(r.ev)});
   if(!selMet) selReqs.forEach(function(r){if(r.verdict==="INSUFFICIENT") ask.push(r.ev)});
   var reqs=ess.concat(selReqs).concat(R.filter(function(r){return r.kind==="참고"}));
   return {overall:overall,reqs:reqs,ask:ask};
@@ -422,8 +467,9 @@ function reqRow(r){
   var law=r.law?'<span class="law">'+esc(r.law)+'</span>':'';
   var ev=r.ev?'<div class="req-ev">'+ (r.miss&&r.verdict==="INSUFFICIENT"?'📄 <b>'+esc(r.miss)+'</b> — ':'') + esc(r.ev)+'</div>':
     (r.miss&&r.verdict==="INSUFFICIENT"?'<div class="req-ev">📄 <b>'+esc(r.miss)+'</b> 필요</div>':'');
+  var pv=r.provisional?'<span class="prov">잠정 · 구역 경계 아님</span>':'';
   return '<div class="req'+(r.verdict==="NA"?' na-row':'')+'"><div class="req-top"><span class="dot '+r.verdict+'"></span>'+
-    '<span class="req-name">'+esc(r.name)+law+'</span>'+v+'</div>'+ev+'</div>';
+    '<span class="req-name">'+esc(r.name)+pv+law+'</span>'+v+'</div>'+ev+'</div>';
 }
 function esc(s){return String(s).replace(/[&<>]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;"}[c]})}
 function setSignal(el,color){el.querySelectorAll("i").forEach(function(i){i.classList.remove("on")});
@@ -433,7 +479,8 @@ function run(){
   var A=evalCriteria(), C=evalSucc();
   // module A
   $("reqsA").innerHTML=A.reqs.map(reqRow).join("");
-  var la=LABEL[A.overall]; $("pillA").className="pill "+la[0]; $("pillA").textContent=TXT[A.overall].A||A.overall;
+  var la=LABEL[A.overall]; $("pillA").className="pill "+la[0];
+  $("pillA").textContent=A.designated?"이미 정비구역 지정됨":(TXT[A.overall].A||A.overall);
   // module C
   $("reqsC").innerHTML=C.exs.map(reqRow).join("");
   var lc=LABEL[C.overall]; $("pillC").className="pill "+lc[0]; $("pillC").textContent=TXT[C.overall].C||C.overall;
@@ -442,7 +489,8 @@ function run(){
   var combo,cls,sig,sub;
   if(aBad||cBad){combo="받기 어려움";cls="no";sig="r";
     sub=aBad?"재개발 요건 미달":"현금청산 대상(입주권 승계 불가)";}
-  else if(aGood&&cGood){combo="받을 수 있음";cls="go";sig="g";sub="요건·자격 둘 다 충족 (실제 진행은 별개)";}
+  else if(aGood&&cGood){combo="받을 수 있음";cls="go";sig="g";
+    sub=A.designated?"이미 지정된 정비구역 + 입주권 자격 충족 (실제 진행은 별개)":"요건·자격 둘 다 충족 (실제 진행은 별개)";}
   else {combo="확인 필요";cls="hold";sig="y";sub="한쪽 이상 자료 보완 필요 — 아래 요청자료 참고";}
   $("comboV").className="v "+cls; $("comboV").textContent=combo; $("comboS").textContent=sub;
   setSignal($("sigCombo"),sig);
@@ -459,6 +507,7 @@ var PRE={
   hold:{type:"재개발",promo:0,toohee:1,area:15000,nohu:70,gwaso:"",jeopdo:"",hosu:"",nohuA:"",built:1990,struct:"RC공동주택",own:2011,reside:"",myeong:"",johap:"",saeop:"",chak:"",claims:[]}
 };
 function applyPreset(p){var d=PRE[p];if(!d)return;
+  ZONE=null; PROXY=false; $("ad-zone").innerHTML="";
   ["type","struct"].forEach(function(k){$(k).value=d[k]});
   ["promo","toohee"].forEach(function(k){$(k).checked=!!d[k]});
   ["area","nohu","gwaso","jeopdo","hosu","nohuA","built","own","reside","myeong","johap","saeop","chak"].forEach(function(k){$(k).value=d[k]});
@@ -467,7 +516,12 @@ function applyPreset(p){var d=PRE[p];if(!d)return;
 }
 
 /* wire */
-document.querySelectorAll("input,select").forEach(function(el){el.addEventListener("input",run)});
+document.querySelectorAll("input,select").forEach(function(el){el.addEventListener("input",function(){
+  /* 손으로 값을 바꾸면 주소 조회로 확정된 상태를 계속 주장하지 않는다 */
+  if(["area","nohu","nohuA","type","promo"].indexOf(el.id)>=0){ZONE=null;}
+  if(el.id==="nohu"||el.id==="nohuA"){PROXY=false;}
+  run();
+})});
 document.querySelectorAll("#claims .chip").forEach(function(c){c.addEventListener("click",function(){
   c.setAttribute("aria-pressed",c.getAttribute("aria-pressed")==="true"?"false":"true");run()})});
 document.querySelectorAll(".preset").forEach(function(b){b.addEventListener("click",function(){applyPreset(b.dataset.p)})});
@@ -521,6 +575,67 @@ function agFetch(){
     $("ag-msg").textContent="⚠️ 로컬 서버 없음 — 터미널에서 python serve.py 실행 후 localhost:8000 에서 써야 집계됩니다.";
   });
 }
+/* 주소 한 줄 조회 — serve.py /api/address */
+function adRender(d){
+  var box=$("ad-zone"), a=d.addr;
+  var L=[];
+  if(d.designated){
+    L.push('<div class="zbanner on"><b>🟢 이미 정비구역으로 지정됨</b> — '+esc(d.zoneName)+
+      ' <span style="color:var(--ink-2)">('+esc(d.zoneKind)+')</span>'+
+      (d.promo?' · 재정비촉진지구 안':'')+
+      '<div class="meta">면적 '+Math.round(d.zoneArea).toLocaleString()+'㎡'+
+      (d.notice?' · 고시 '+esc(d.notice):'')+' · 지정요건은 행정청이 이미 심사·인정</div>'+
+      '<div class="warn">⚠ 해제·변경 이력은 이 자료로 확인 불가 — 정보몽땅·자치구 고시 확인 필요</div></div>');
+  }else if(d.promo){
+    L.push('<div class="zbanner off">⚪ 개별 정비구역은 미지정 · <b>'+esc(d.zoneName||"재정비촉진지구")+
+      '</b> 안 → 노후도 기준 50% 적용</div>');
+  }else{
+    L.push('<div class="zbanner off">⚪ 지정된 정비구역·촉진지구 밖 — 아래 요건으로 “될 수 있나”를 봅니다</div>');
+  }
+  box.innerHTML=L.join("");
+  var bits=[a.jibun||a.road, a.sigungu+"/"+a.bjdong+"/"+a.bun+"/"+a.ji];
+  if(a.lat!=null) bits.push(a.lat.toFixed(5)+", "+a.lon.toFixed(5)+" ["+a.crs+"]");
+  else bits.push("좌표 미확인 — "+a.crs);
+  $("ad-msg").textContent="✓ "+bits.join("  ·  ");
+  if(d.warn&&d.warn.length) $("ad-msg").textContent+="   ⚠ "+d.warn.join(" / ");
+
+  /* 폼 채우기 */
+  ZONE = d.designated?{designated:true,name:d.zoneName,kind:d.zoneKind,area:d.zoneArea,
+                       notice:d.notice,promo:d.promo}:null;
+  $("type").value=d.type||"재개발";
+  $("promo").checked=!!d.promo;
+  ["af-sig","af-bj","af-bun","af-ji"].forEach(function(id,i){
+    $(id).value=[a.sigungu,a.bjdong,a.bun,a.ji][i]});
+  if(d.zoneArea) $("area").value=Math.round(d.zoneArea);
+  var b=d.building;
+  if(b&&b.ok){ if(b.built)$("built").value=b.built; if(b.struct)$("struct").value=b.struct;
+    $("af-msg").textContent="✓ "+(b.bldNm||"")+" · 준공 "+(b.built||"?")+" · "+(b.households||0)+"세대"; }
+  PROXY=false;
+  if(!d.designated && d.aging){
+    $("nohu").value=(d.aging.lo*100).toFixed(1);
+    if(d.aging.area_lo>0) $("nohuA").value=(d.aging.area_lo*100).toFixed(1);
+    PROXY=true;
+    $("ag-msg").textContent="✓ "+d.aging.label+" 전수 "+d.aging.total.toLocaleString()+
+      "동 · 노후 "+(d.aging.lo*100).toFixed(1)+"%"+
+      (d.aging.unknown?" (미상 "+d.aging.unknown+"동, 상한 "+(d.aging.hi*100).toFixed(1)+"%)":"")+
+      " — 구역 경계가 아니라 "+d.aging.unit+" 단위라 잠정";
+  }
+  run();
+}
+function adFetch(){
+  var kw=$("ad-q").value.trim();
+  if(!kw){$("ad-msg").textContent="주소를 입력하세요.";return}
+  $("ad-msg").textContent="조회 중…"; $("ad-zone").innerHTML="";
+  fetch("/api/address?q="+encodeURIComponent(kw)).then(function(r){return r.json()}).then(function(d){
+    if(!d.ok){$("ad-msg").textContent="⚠️ "+(d.error||"조회 실패");return}
+    adRender(d);
+  }).catch(function(){
+    $("ad-msg").textContent="⚠️ 로컬 서버 없음 — 터미널에서 python serve.py 실행 후 localhost:8000 에서 쓰세요.";
+  });
+}
+$("ad-btn").addEventListener("click",adFetch);
+$("ad-q").addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();adFetch()}});
+
 $("ag-btn").addEventListener("click",agFetch);
 $("ag-q").addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();agFetch()}});
 

@@ -72,12 +72,18 @@ class Area:          # 정비구역 (지정 핵심)
     사업유형: str = "재개발"
     지역: str = "서울"
     재정비촉진지구: bool = False
+    # 이미 정비구역으로 지정·고시된 경우 — 지정요건은 행정청이 이미 인정한 것이라
+    # 노후도·면적·선택요건을 우리가 다시 추정할 필요가 없다(요건 심사 종료).
+    지정고시: Optional[Fact] = None
     면적: Optional[Fact] = None          # ㎡ [필수]
     노후불량비율: Optional[Fact] = None  # 0~1 [필수]
     과소필지비율: Optional[Fact] = None  # 0~1 [선택]
     접도율: Optional[Fact] = None        # 0~1 [선택] 낮을수록 열악
     호수밀도: Optional[Fact] = None      # ha당 동수 [선택]
     노후연면적비율: Optional[Fact] = None # 0~1 [선택]
+    # 노후도를 잰 단위가 '정비구역 경계'가 아니라 법정동·도로·지번블록인 경우.
+    # 값 자체는 전수 실측이지만 측정 대상이 요건의 그것과 달라 결론을 확정하지 않는다.
+    노후도_대리지표: bool = False
 
 
 @dataclass
@@ -89,7 +95,8 @@ class Req:
     source_span: Optional[str] = None
     grade: Grade = Grade.U
     missing_input: Optional[str] = None
-    kind: str = "필수"   # "필수" | "선택" | "참고"
+    kind: str = "필수"   # "필수" | "선택" | "참고" | "지정"
+    provisional: bool = False   # 값은 실측이나 '측정 대상'이 요건의 그것과 달라 확정 불가
 
 
 # ── 판정 헬퍼 ──
@@ -123,6 +130,14 @@ def _building_old(b: Building) -> Req:
                value=f"준공 {b.준공일.value} → {yrs:.0f}년 (기준 {need}년)",
                source_doc=b.준공일.source_doc, source_span=b.준공일.source_span,
                grade=b.준공일.grade, kind="참고")
+
+
+def _designated(a: Area) -> Req:
+    """이미 지정·고시됨 → 지정요건 충족을 행정청이 인정한 상태."""
+    f = a.지정고시
+    return Req("정비구역 지정 여부", V.MET, value=str(f.value),
+               source_doc=f.source_doc, source_span=f.source_span,
+               grade=f.grade, kind="필수")
 
 
 def _area_ratio(a: Area) -> Req:
@@ -163,15 +178,21 @@ def _selects(a: Area) -> list[Req]:
 class Report:
     reqs: list[Req]
     overall: str
+    designated: bool = False
     scope: str = "재개발 '될 수 있나'(정비구역 지정 요건) 판정 — 실제 진행/실현 여부는 예측 안 함"
     notes: list[str] = field(default_factory=list)
 
     @property
     def 요청자료(self) -> list[str]:
+        if self.designated:      # 이미 지정 → 지정요건 자료를 더 받을 이유가 없다
+            return [r.missing_input for r in self.reqs
+                    if r.kind == "참고" and r.verdict == V.INSUFFICIENT and r.missing_input]
         선택충족 = any(r.kind == "선택" and r.verdict == V.MET for r in self.reqs)
         docs = []
         for r in self.reqs:
-            if r.verdict != V.INSUFFICIENT or not r.missing_input:
+            if not r.missing_input:
+                continue
+            if r.verdict != V.INSUFFICIENT and not r.provisional:
                 continue
             if r.kind == "선택" and 선택충족:   # 이미 선택 1개 충족 → 나머지 불필요
                 continue
@@ -180,10 +201,25 @@ class Report:
         return docs
 
 
-_OA = {"가능": "재개발 될 수 있음", "미달": "요건 미달", "확인": "확인 필요"}
+_OA = {"가능": "재개발 될 수 있음", "미달": "요건 미달", "확인": "확인 필요",
+       "지정": "이미 정비구역으로 지정됨"}
 
 
 def evaluate(b: Building, a: Area) -> Report:
+    if a.지정고시 is not None:
+        # 지정 고시가 있으면 지정요건 판정은 끝난 사안.
+        # 선택요건(과소필지·접도율·호수밀도·노후연면적)은 지정 심사에서 이미 소진됐으므로
+        # 더 물어보지 않는다. 남기는 건 '지정 사실 · 구역 면적 · 내 건물' 셋.
+        size = _area_size(a)
+        size.kind = "지정"
+        reqs = [_designated(a), size, _building_old(b)]
+        notes = [f"이미 {a.사업유형} 정비구역으로 지정·고시됨 → 지정요건(노후도·면적·선택요건)은 "
+                 f"행정청이 심사해 인정한 상태. 우리가 다시 추정하지 않는다.",
+                 "⚠ 이 자료는 현행 고시도형이라 '해제·변경 이력'은 확인할 수 없다. "
+                 "구역 존속 여부는 정보몽땅·자치구 고시로 확인 필요.",
+                 "⚠ 지정 = 요건 충족(A게이트 통과)일 뿐, 사업이 실제로 진행·완공될지는 예측하지 않는다."]
+        return Report(reqs, _OA["지정"], designated=True, notes=notes)
+
     size = _area_size(a)
     ratio = _area_ratio(a)
     selects = _selects(a)
@@ -191,14 +227,31 @@ def evaluate(b: Building, a: Area) -> Report:
     reqs = [size, ratio, *selects, building]
     notes = []
 
+    if a.노후도_대리지표 and ratio.verdict in (V.MET, V.NOT_MET):
+        # 잰 값은 진짜지만 잰 범위가 구역 경계가 아니다 → 확정도 미달도 선언하지 않는다.
+        ratio.provisional = True
+        ratio.missing_input = "정비구역 경계(정비계획 자료) — 경계 안에서 다시 집계"
+        for s_ in selects:
+            if s_.name == "노후 연면적 비율" and s_.verdict in (V.MET, V.NOT_MET):
+                s_.provisional = True
+                s_.missing_input = "정비구역 경계(정비계획 자료) — 경계 안에서 다시 집계"
+
+    def _eff(r):
+        """확정 판정용 유효값 — 잠정이면 '확인필요'로 다룬다(반올림 금지)."""
+        return V.INSUFFICIENT if r.provisional else r.verdict
+
     essential = [size, ratio]            # 필수 = 면적 AND 노후도
-    if any(r.verdict == V.NOT_MET for r in essential):
+    if any(_eff(r) == V.NOT_MET for r in essential):
         overall = _OA["미달"]
         notes.append("필수요건(면적·노후도) 미달 → 정비구역 지정 어려움.")
-    elif any(r.verdict in (V.INSUFFICIENT, V.NA) for r in essential):
+    elif any(_eff(r) in (V.INSUFFICIENT, V.NA) for r in essential):
         overall = _OA["확인"]
+        if ratio.provisional:
+            notes.append(
+                "노후도는 전수 실측이지만 집계 범위가 정비구역 경계가 아니라 대리지표다 "
+                "→ 충족/미달을 확정하지 않는다. 경계가 정해지면 그 안에서 다시 세면 확정된다.")
     else:  # 필수 둘 다 MET → 선택요건 1개 이상
-        sv = [s.verdict for s in selects]
+        sv = [_eff(s) for s in selects]
         if V.MET in sv:
             overall = _OA["가능"]
         elif V.INSUFFICIENT in sv:
@@ -216,17 +269,21 @@ _ICON = {V.MET: "🟢MET", V.NOT_MET: "🔴NOT_MET", V.INSUFFICIENT: "🟡확인
 
 
 def render(rep: Report) -> str:
-    head = {"재개발 될 수 있음": "🟢", "요건 미달": "🔴", "확인 필요": "🟡"}
+    head = {"재개발 될 수 있음": "🟢", "요건 미달": "🔴", "확인 필요": "🟡",
+            "이미 정비구역으로 지정됨": "🟢"}
     L = [f"■ 판정: {head.get(rep.overall,'')} {rep.overall}",
          f"  스코프: {rep.scope}", ""]
-    for kind, title in [("필수", "[필수요건 — 면적·노후도]"),
-                        ("선택", "[선택요건 — 1개 이상]"),
-                        ("참고", "[내 건물 — 참고]")]:
+    sections = ([("필수", "[지정 사실 — 고시로 확정]"), ("지정", "[구역 제원]"),
+                 ("참고", "[내 건물 — 참고]")] if rep.designated else
+                [("필수", "[필수요건 — 면적·노후도]"), ("선택", "[선택요건 — 1개 이상]"),
+                 ("참고", "[내 건물 — 참고]")])
+    for kind, title in sections:
         L.append(title)
         for r in rep.reqs:
             if r.kind != kind:
                 continue
-            L.append(f"  {_ICON[r.verdict]} {r.name}: {r.value or ''}")
+            L.append(f"  {_ICON[r.verdict]} {r.name}: {r.value or ''}"
+                     + ("   〔잠정 — 구역 경계 아님〕" if r.provisional else ""))
             if r.source_span:
                 L.append(f"      └ 원문: {r.source_span} [{r.source_doc}]")
             if r.missing_input:

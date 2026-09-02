@@ -296,13 +296,21 @@ def to_facts(ag: Aging) -> dict:
     return out
 
 
-def to_area(ag: Aging, 면적: Optional[float] = None, 촉진: bool = False) -> Area:
+def to_area(ag: Aging, 면적: Optional[float] = None, 촉진: bool = False,
+            proxy: bool = True) -> Area:
+    """집계 → Area.
+
+    proxy=True(기본): 집계 단위(법정동·도로·지번블록)가 정비구역 경계가 아니므로
+      노후도로 충족/미달을 '확정'하지 않는다. 값과 판정은 그대로 보여주되 잠정 표시.
+    proxy=False: 사용자가 '이 범위를 구역으로 본다'고 명시한 경우(aging.py --judge).
+    """
     f = to_facts(ag)
     return Area(
         사업유형="재개발", 지역="서울", 재정비촉진지구=촉진,
         면적=(Fact(면적, Grade.T, "사용자 입력", f"구역 면적 {면적:,.0f}㎡") if 면적 else None),
         노후불량비율=f["노후불량비율"],
         노후연면적비율=f["노후연면적비율"],
+        노후도_대리지표=proxy,
     )
 
 
@@ -448,7 +456,8 @@ def main(argv=None):
 
     if a.judge:
         print("\n" + "=" * 60)
-        area = to_area(target, a.area, a.촉진)
+        # --judge 는 사용자가 이 집계 범위를 구역으로 간주한 것 → 확정 판정
+        area = to_area(target, a.area, a.촉진, proxy=False)
         b = Building()
         print(render(evaluate(b, area)))
 

@@ -75,6 +75,86 @@ def _aging_payload(q: dict) -> dict:
     return {**base, "list": [_ag_row(a) for a in items[:top]], "matched": len(items)}
 
 
+# ── 주소 한 줄 → 전체 (juso → geo 구역 → 대장 → 노후도) ──
+
+def _zone_row(z) -> dict:
+    return {"name": z.name, "kind": z.kind, "family": z.family, "area": z.area,
+            "notice": z.notice, "created": z.created, "parts": z.parts, "gu": z.gu}
+
+
+def _address_payload(q: dict) -> dict:
+    kw = (q.get("q", [""])[0] or "").strip()
+    if not kw:
+        return {"ok": False, "error": "주소를 입력하세요"}
+    mock = q.get("mock", ["0"])[0] in ("1", "true")
+    import juso
+    warn = []
+
+    try:
+        hits = juso.search(kw, mock)
+    except SystemExit as e:
+        return {"ok": False, "error": str(e)}
+    if not hits:
+        return {"ok": False, "error": "주소 검색 결과 없음 — 더 구체적으로 (예: 관악구 신림동 10-10)"}
+    a = juso.coord(hits[0], mock)
+
+    out = {"ok": True, "addr": {
+        "road": a.roadAddr, "jibun": a.jibunAddr, "admCd": a.admCd, "gu": a.자치구,
+        "sigungu": a.sigungu, "bjdong": a.bjdong, "bun": a.bun, "ji": a.ji,
+        "lat": a.lat, "lon": a.lon, "crs": a.crs, "bdNm": a.bdNm},
+        "alts": [h.roadAddr for h in hits[1:5]]}
+
+    # 구역
+    zones = []
+    if a.lat is not None:
+        try:
+            import geo
+            zones = geo.at(a.lat, a.lon)
+        except SystemExit as e:
+            warn.append(f"구역 데이터 없음: {e}")
+    else:
+        warn.append("좌표 미확인 → 구역 판정 건너뜀 (JUSO_COORD_KEY 필요)")
+    body = promo = None
+    if zones:
+        import geo
+        body, promo = geo.pick(zones)
+    out["zones"] = [_zone_row(z) for z in zones]
+    out["designated"] = body is not None
+    out["promo"] = promo is not None
+    out["type"] = "재건축" if (body and body.family == "재건축") else "재개발"
+    out["zoneArea"] = body.area if body else None
+    out["zoneName"] = body.name if body else (promo.name if promo else None)
+    out["zoneKind"] = body.kind if body else (promo.kind if promo else None)
+    out["notice"] = body.notice if body else None
+
+    # 건축물대장
+    try:
+        out["building"] = _building_payload(fetch_title(a.sigungu, a.bjdong, a.bun, a.ji, mock))
+    except SystemExit as e:
+        out["building"] = {"ok": False, "error": str(e)}
+        warn.append(f"건축물대장: {e}")
+    except Exception as e:
+        out["building"] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        warn.append(f"건축물대장: {type(e).__name__}")
+
+    # 노후도 — 이미 지정된 구역이면 다시 셀 이유가 없다
+    out["aging"] = None
+    if not out["designated"]:
+        try:
+            buckets = _aging_buckets("road")
+            ag = buckets.get(a.rnMgtSn)
+            if ag is None:
+                buckets = _aging_buckets("bun")
+                ag = buckets.get(a.bun.lstrip("0") or "0")
+            out["aging"] = _ag_row(ag) if ag else None
+            if ag is None:
+                warn.append("이 주소의 도로·지번블록은 가진 표제부 CSV 범위 밖")
+        except SystemExit as e:
+            warn.append(f"노후도: {e}")
+    out["warn"] = warn
+    return out
+
+
 def _building_payload(raw: dict) -> dict:
     y = raw.get("useAprDay")
     year = int(y[:4]) if y and len(str(y)) >= 4 else None
@@ -110,6 +190,27 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e:
                 self._json({"ok": False, "error": type(e).__name__ + ": " + str(e)}, 200)
             return
+        if parts.path == "/api/address":
+            try:
+                self._json(_address_payload(urllib.parse.parse_qs(parts.query)))
+            except SystemExit as e:
+                self._json({"ok": False, "error": str(e)}, 200)
+            except Exception as e:
+                self._json({"ok": False, "error": type(e).__name__ + ": " + str(e)}, 200)
+            return
+        if parts.path == "/api/zonesearch":
+            try:
+                import geo
+                qs = urllib.parse.parse_qs(parts.query)
+                term = (qs.get("q", [""])[0] or "").strip()
+                zs = geo.search(term) if term else []
+                self._json({"ok": True, "list": [_zone_row(z) for z in zs[:20]],
+                            "matched": len(zs)})
+            except SystemExit as e:
+                self._json({"ok": False, "error": str(e)}, 200)
+            except Exception as e:
+                self._json({"ok": False, "error": type(e).__name__ + ": " + str(e)}, 200)
+            return
         if parts.path == "/api/aging":
             try:
                 self._json(_aging_payload(urllib.parse.parse_qs(parts.query)))
@@ -128,7 +229,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     print(f"▶ 재개발 신호등 로컬 서버: http://localhost:{PORT}")
-    print("  (건축물대장 자동채움 + 표제부 전수 노후도 활성 · Ctrl+C 종료)")
+    print("  (주소 한 줄 조회 + 정비구역 판정 + 대장 자동채움 + 전수 노후도 · Ctrl+C 종료)")
     with ThreadingTCPServer(("127.0.0.1", PORT), Handler) as httpd:
         try:
             httpd.serve_forever()

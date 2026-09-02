@@ -8,3 +8,6 @@ __pycache__/
 
 # 원천 데이터 — 건축HUB 표제부 CSV (8MB+, 각자 내려받기). 집계본(data/*.json)만 커밋.
 /*.csv
+
+# 원천 SHP zip — geo.py --fetch 로 언제든 다시 받는다. 변환본(data/zones-seoul.json)만 커밋.
+data/_src-*.zip
