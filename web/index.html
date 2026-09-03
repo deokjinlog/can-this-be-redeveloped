@@ -621,6 +621,12 @@ function adRender(d){
   ZONE = d.designated?{designated:true,name:d.zoneName,kind:d.zoneKind,area:d.zoneArea,
                        notice:d.notice,promo:d.promo}:null;
   GATE = d.site?{gate:d.site.gate,stage:d.site.stage,why:d.site.why,law:d.site.law}:null;
+  if(d.site && d.site.anchors){
+    var A=d.site.anchors, yr=function(s){return s?parseInt(s.slice(0,4),10):null};
+    if(A["조합설립인가일"]) $("johap").value=yr(A["조합설립인가일"]);
+    if(A["사업시행계획인가일"]) $("saeop").value=yr(A["사업시행계획인가일"]);
+    if(A["착공일"]) $("chak").value=yr(A["착공일"]);
+  }
   $("type").value=d.type||"재개발";
   $("promo").checked=!!d.promo;
   ["af-sig","af-bj","af-bun","af-ji"].forEach(function(id,i){
@@ -638,6 +644,9 @@ function adRender(d){
       '<div class="st">진행단계 '+esc(d.site.stage||"(미표시)")+
       (d.site.진행률?" · "+Math.round(d.site.진행률*100)+"% 지점":"")+" — "+esc(d.site.name)+'</div>'+
       '<div class="st">'+esc(d.site.why)+'</div>'+
+      (d.site.anchors?'<div class="st">인가일 — '+Object.keys(d.site.anchors).map(function(k){
+          return esc(k)+" "+esc(d.site.anchors[k])}).join(" · ")+'</div>':'')+
+      (d.site.note?'<div class="st" style="color:var(--hold)">⚠ '+esc(d.site.note)+'</div>':'')+
       (g==="미발동"?'<div class="st">→ 지금은 서류 없이 승계 가능. 계약~잔금 사이 인가가 나면 뒤집힘</div>':'')+
       '</div>');
   }

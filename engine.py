@@ -210,9 +210,19 @@ def _ex_재건축_기간(c: Case, exid, label, law, anchor_fact, anchor_name,
                         value="해당 인가/착공 없음 → 이 예외 성립 불가",
                         grade=anchor_fact.grade))
     else:
-        passed3 = _years(anchor_fact.value, c.기준일) >= 3
-        if 후속_fact is None:
-            # 후속행위 발생 여부 자체가 미확인
+        yrs = _years(anchor_fact.value, c.기준일)
+        passed3 = yrs >= 3
+        if not passed3:
+            # 3년이 아직 안 지났으면 후속행위 여부와 무관하게 이 예외는 성립 불가.
+            # (여기서 '확인필요'로 두면 필요 없는 자료를 요청하게 된다)
+            reqs.append(Req(f"{anchor_name}+3년 경과", V.NOT_MET,
+                            value=f"{anchor_name} {anchor_fact.value} → {yrs:.1f}년 "
+                                  f"(3년 미경과, {anchor_fact.value.replace(year=anchor_fact.value.year + 3)} 이후 재검토)",
+                            source_doc=anchor_fact.source_doc,
+                            source_span=anchor_fact.source_span,
+                            grade=anchor_fact.grade))
+        elif 후속_fact is None:
+            # 3년은 지났는데 후속행위 발생 여부가 미확인
             reqs.append(Req(f"{anchor_name}+3년 내 후속행위 없음", V.INSUFFICIENT,
                             grade=Grade.U, missing_input=후속_doc))
         else:

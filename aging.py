@@ -419,8 +419,12 @@ def cross_check(ag: Aging, site) -> Optional[tuple[bool, str]]:
     if expect is None:
         return None
     ok = site.stage in expect
-    return (ok, f"대장 실측 추정 '{ph[1]}' vs 정보몽땅 게시 '{site.stage}'"
-                + ("  → 일치" if ok else "  → 어긋남(게시 갱신 시차이거나, 구역 매칭이 틀렸을 수 있음)"))
+    if ok:
+        return (True, f"대장 실측 추정 '{ph[1]}' vs 정보몽땅 게시 '{site.stage}'  → 일치")
+    return (False,
+            f"대장 실측 추정 '{ph[1]}' vs 정보몽땅 게시 '{site.stage}'  → 어긋남. "
+            "고시도형에는 같은 땅의 **옛 구역과 현행 구역이 함께** 실려 있어, "
+            "이미 끝난 세대의 구역을 현행 사업장에 붙였을 수 있다(게시 갱신 시차도 원인).")
 
 
 # ── criteria_engine 연결 ──

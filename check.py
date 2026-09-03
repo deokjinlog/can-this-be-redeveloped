@@ -96,6 +96,7 @@ def run(keyword: str, mock: bool = False, unit: str = "road"):
 
     # ── 2b. 진행단계 (정보몽땅) ──
     site = None
+    zone_note = None
     if zones:
         import geo as _geo
         import stage
@@ -112,7 +113,11 @@ def run(keyword: str, mock: bool = False, unit: str = "road"):
                   + f"   — {site.name}")
             if site.op and site.op != "운영":
                 print(f"    ⚠ 운영구분: {site.op}")
+            zone_note = stage.match_note(_body, site)
+            if zone_note:
+                print(f"    ⚠ {zone_note}")
         print()
+    out["zone_note"] = zone_note
     out["site"] = site
 
     # ── 3. 내 건물 (건축물대장) ──
@@ -197,6 +202,23 @@ def run(keyword: str, mock: bool = False, unit: str = "road"):
     print("=" * 62)
     print(CE.render(rep))
 
+    # ── 5b. 인가 일자 (추진경과) ──
+    el = None
+    if site is not None and site.cafe:
+        import elapse
+        el = _try("추진경과(정보몽땅)", lambda: elapse.load().get(site.cafe))
+        print("=" * 62)
+        print("[5b] 인가 일자 (조합 추진경과)")
+        if el is None:
+            print(f"    ⚪ 미수집/미공개 — 받으려면:  python elapse.py --cafe {site.cafe}")
+        else:
+            for fld, d in el.anchors.items():
+                print(f"    · {fld:<16} {d}")
+            if not el.anchors:
+                print("    ⚪ 이벤트는 있으나 인가 기산점이 없음")
+        print()
+    out["elapse"] = el
+
     # ── 6. C게이트 — §39② 시점 요건은 서류 없이도 판정된다 ──
     print("=" * 62)
     print("■ C 게이트 — 입주권 자격 (조합원 지위 승계)")
@@ -217,14 +239,48 @@ def run(keyword: str, mock: bool = False, unit: str = "road"):
             print()
             print("  → 도시정비법 §39② 사업이 아니라 이 엔진의 스코프 밖입니다. "
                   "해당 특례법의 양도 제한을 따로 확인하세요.")
-    if site is None or site.승계제한[0] in ("발동", "확인필요"):
+    if site is not None and site.승계제한[0] == "발동":
+        # 인가 일자가 있으면 재건축 3년 트리(예외5~7)는 서류 없이도 돌아간다.
+        import engine as EN
+        import elapse as EL
+        kw = dict(사업유형="재건축" if site.law == "재건축" else "재개발",
+                  기준일=date.today(), 기준일_기준="미정", 투기과열지구=True,
+                  제한발동=EN.Fact(True, EN.Grade.S1, "정보몽땅 사업장목록",
+                                f"현재 '{site.stage}'"))
+        if el is not None:
+            kw.update(EL.to_case_facts(el))
+        rep = EN.evaluate(EN.Case(**kw))
+        out["succ"] = rep
+        print()
+        print(f"  가진 자료만으로 8예외를 돌린 결과: {rep.overall}")
+        icon = {"MET": "🟢", "NOT_MET": "🔴", "INSUFFICIENT": "🟡",
+                "CONFLICT": "🟠", "NA": "⚪"}
+        for ex in rep.exceptions:
+            v = ex.verdict.name
+            if v == "NA":
+                continue
+            # 재건축 3년 트리는 인가 일자로 자동 판정되므로 결과를 펼쳐 보인다
+            auto = ex.id.startswith(("ex5", "ex6", "ex7"))
+            if v == "MET" or auto:
+                why = ""
+                if auto:
+                    r0 = ex.reqs[0]
+                    why = f" — {r0.value or r0.missing_input or r0.name}"
+                print(f"    {icon[v]} {ex.label}{why}")
+        if el is not None and kw.get("조합설립인가일"):
+            print("    ↑ 재건축 3년 트리(예외5~7)는 위 인가 일자로 자동 판정됨"
+                  " · 소유 3년 요건은 등기부 필요")
+        print()
+        print("  나머지 예외는 개인 서류가 있어야 확정됩니다 (공공데이터에 없음):")
+        print("    📄 등기부등본 (매도인 취득일)")
+        print("    📄 주민등록초본 (매도인 거주기간, 배우자·직계존비속 합산)")
+        print("    📄 (해당 시) 상속·해외이주·경매 증빙")
+    elif site is None or site.승계제한[0] == "확인필요":
         print()
         print("  8예외 판정에 필요한 서류 (공공데이터에 없음 — 업로드가 유일한 경로):")
         print("    📄 등기부등본 (매도인 취득일)")
         print("    📄 주민등록초본 (매도인 거주기간, 배우자·직계존비속 합산)")
         print("    📄 (해당 시) 상속·해외이주·경매 증빙")
-        print("    ※ 재건축 3년 트리(예외5~7)는 인가 '일자'가 필요한데 목록에 없습니다 "
-              "→ 고시문·사업장 상세 확인 필요")
 
     if _ERR:
         print("\n── 진행 중 건너뛴 단계 ──")

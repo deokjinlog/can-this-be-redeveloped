@@ -148,7 +148,16 @@ def _address_payload(q: dict) -> dict:
                 out["site"] = {"name": st.name, "kind": st.kind, "law": st.law,
                                "stage": st.stage, "rank": st.rank,
                                "진행률": st.진행률, "op": st.op,
-                               "gate": gate, "why": why}
+                               "gate": gate, "why": why,
+                               "note": stage.match_note(body, st)}
+                if st.cafe:
+                    try:
+                        import elapse
+                        e = elapse.load().get(st.cafe)
+                        if e:
+                            out["site"]["anchors"] = e.anchors
+                    except Exception:
+                        pass
         except SystemExit as e:
             warn.append(f"진행단계: {e}")
         except Exception as e:

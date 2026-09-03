@@ -179,7 +179,7 @@ class Report:
     reqs: list[Req]
     overall: str
     designated: bool = False
-    scope: str = "재개발 '될 수 있나'(정비구역 지정 요건) 판정 — 실제 진행/실현 여부는 예측 안 함"
+    scope: str = "'될 수 있나'(정비구역 지정 요건) 판정 — 실제 진행/실현 여부는 예측 안 함"
     notes: list[str] = field(default_factory=list)
 
     @property
@@ -218,7 +218,9 @@ def evaluate(b: Building, a: Area) -> Report:
                  "⚠ 이 자료는 현행 고시도형이라 '해제·변경 이력'은 확인할 수 없다. "
                  "구역 존속 여부는 정보몽땅·자치구 고시로 확인 필요.",
                  "⚠ 지정 = 요건 충족(A게이트 통과)일 뿐, 사업이 실제로 진행·완공될지는 예측하지 않는다."]
-        return Report(reqs, _OA["지정"], designated=True, notes=notes)
+        return Report(reqs, _OA["지정"], designated=True, notes=notes,
+                      scope=f"{a.사업유형} '될 수 있나'(정비구역 지정 요건) 판정"
+                            " — 실제 진행/실현 여부는 예측 안 함")
 
     size = _area_size(a)
     ratio = _area_ratio(a)
@@ -261,7 +263,9 @@ def evaluate(b: Building, a: Area) -> Report:
             overall = _OA["미달"]
             notes.append("노후도·면적은 충족하나 선택요건 4종을 하나도 못 넘김.")
     notes.append(f"※ 기준=서울 조례. 타 지자체는 조례 상이. 출처: {Cfg.SRC}")
-    return Report(reqs, overall, notes=notes)
+    return Report(reqs, overall, notes=notes,
+                  scope=f"{a.사업유형} '될 수 있나'(정비구역 지정 요건) 판정"
+                        " — 실제 진행/실현 여부는 예측 안 함")
 
 
 _ICON = {V.MET: "🟢MET", V.NOT_MET: "🔴NOT_MET", V.INSUFFICIENT: "🟡확인필요",

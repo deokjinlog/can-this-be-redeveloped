@@ -10,8 +10,12 @@ stage.py — 정비사업 진행단계 (정보몽땅 사업장 목록)
     → 그 시점 **전**이면 제한 자체가 없다. 지금까지 이 게이트가 없어서
       투기과열지구이기만 하면 무조건 8예외를 따졌다(과잉 판정).
 
-원천: 정비사업 정보몽땅(cleanup.seoul.go.kr) 사업장검색 → 엑셀다운로드 `사업장목록.xls`.
-      data/raw/mongttang/ 에 두고  python stage.py --setup
+원천: 정비사업 정보몽땅(cleanup.seoul.go.kr) 사업장검색.
+      `python stage.py --fetch` 가 목록을 직접 읽는다(한 번 요청, 표준 라이브러리만).
+      오프라인이면 엑셀다운로드 `사업장목록.xls` 를 data/raw/mongttang/ 에 두고 --setup.
+      목록에는 엑셀에 없는 것 두 개가 더 있다:
+        · cafe   조합 카페 id  → elapse.py 가 인가 '일자' 를 읽는 입구
+        · agz    구역 id(11620AGZ…) → 고시도형 WTNNC_SN 과 같은 포맷 = 정확 조인키
 
 ⚠ 근거등급 S1(기관 게시) — 대장 전수(P1)보다 한 단계 낮다.
    목록 화면 표시값이라 **인가 '일자'가 없다.** 재건축 3년 트리(예외5~7)는 날짜가 필요해
@@ -26,9 +30,11 @@ stage.py — 정비사업 진행단계 (정보몽땅 사업장 목록)
 """
 
 import argparse
+import html
 import json
 import os
 import re
+import urllib.request
 from dataclasses import dataclass
 from typing import Optional
 
@@ -41,14 +47,14 @@ SRC_DOC = "정비사업 정보몽땅 사업장목록(기관 게시)"
 # ── 단계 순서 — 도시정비법 절차 흐름 ──
 # 같은 순위 = 실무상 같은 지점(표기만 다름). 목록에 실제로 나온 24종 전부 매핑.
 ORDER = {
-    "안전진단": 10,
+    "안전진단": 10, "안전진단(1차)": 10,
     "정비계획 수립": 20,
-    "지구단위계획수립/건축심의/교통심의": 25,
+    "지구단위계획수립/건축심의/교통심의": 25, "도시계획심의": 25,
     "정비구역지정": 30,
     "추진위구성": 40, "추진위원회승인": 45,
     "조합규약작성": 50, "조합창립총회": 55,
     "조합설립인가": 60,          # ← 재건축 §39② 발동
-    "사업계획승인": 65,
+    "사업계획승인": 65, "사업계획승인(리모델링 허가)": 65,
     "사업시행인가": 70,
     "관리처분인가": 80,          # ← 재개발 §39② 발동
     "철거": 85, "철거 및 착공": 88, "착공": 90,
@@ -58,6 +64,9 @@ ORDER = {
     "조합해산": 120, "청산 및 조합해산": 125, "조합청산": 130,
     # 지역주택조합 전용 — 도시정비법 절차가 아니다
     "조합원 모집신고": 0,
+    # '사업시행자지정'(공공시행·신탁방식)은 일부러 넣지 않는다.
+    # 조합이 없는 방식이라 §39② 의 '조합설립인가' 에 대응하는지가 불확실하고,
+    # 순서에 끼워넣으면 그게 곧 추측이 된다 → rank -1 로 두어 '확인필요' 로 흐르게 한다.
 }
 GATE_재건축 = ORDER["조합설립인가"]
 GATE_재개발 = ORDER["관리처분인가"]
@@ -74,6 +83,37 @@ LAW = {
 
 _JIBUN = re.compile(r"^([가-힣0-9]+(?:동|가))\s*(산)?\s*(\d+)(?:\s*-\s*(\d+))?")
 
+LIST_URL = "https://cleanup.seoul.go.kr/cleanup/bsnssttus/lsubBsnsSttus.do?pageSize={}"
+_UA = {"User-Agent": "Mozilla/5.0 (can-this-be-redeveloped; personal non-commercial)"}
+_ROW = re.compile(r"<tr>(.*?)</tr>", re.S)
+_TD = re.compile(r"<td[^>]*>(.*?)</td>", re.S)
+_AGZ = re.compile(r"mapOpenPopup\('([^']+)'\)")
+_CAFE = re.compile(r"cafeOpenPopup\('([^']+)'\)")
+
+
+def _celltext(x: str) -> str:
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", x))).strip()
+
+
+def fetch_list(size: int = 1500) -> list[dict]:
+    """사업장 목록을 한 번에 읽는다. (페이지 파라미터는 pageSize 만 먹는다)"""
+    req = urllib.request.Request(LIST_URL.format(size), headers=_UA)
+    with urllib.request.urlopen(req, timeout=90) as r:
+        page = r.read().decode("utf-8", "replace")
+    out = []
+    for m in _ROW.findall(page):
+        tds = _TD.findall(m)
+        if len(tds) < 6:
+            continue
+        c = [_celltext(t) for t in tds]
+        if not c[0].isdigit():
+            continue
+        a, cf = _AGZ.search(m), _CAFE.search(m)
+        out.append({"자치구": c[1], "사업구분": c[2], "사업장명": c[3], "대표지번": c[4],
+                    "진행단계": c[5], "운영구분": "", "운영단계": "",
+                    "cafe": cf.group(1) if cf else "", "agz": a.group(1) if a else ""})
+    return out
+
 
 @dataclass
 class Site:
@@ -88,6 +128,8 @@ class Site:
     op_stage: str        # 운영단계 (조합 / 추진위원회 / …)
     bjd: str = ""        # 법정동코드 10 (못 찾으면 "")
     pnu: str = ""        # 19자리 (못 만들면 "")
+    cafe: str = ""       # 조합 카페 id — elapse.py 로 인가 일자를 읽는 입구
+    agz: str = ""        # 구역 id (고시도형 WTNNC_SN 과 같은 포맷)
 
     @property
     def 승계제한(self) -> tuple[str, str]:
@@ -128,31 +170,39 @@ def _load_bjd() -> dict:
     return idx
 
 
-def build(src: str = None, out: str = OUT) -> str:
-    """사업장목록.xls → data/stages-seoul.json (대표지번 → PNU 조립)."""
+def _read_xls(src: str = None) -> list[dict]:
     try:
         import xlrd
     except ImportError:
         raise SystemExit(
-            "xlrd 가 필요합니다(변환 1회만).\n"
-            "  uv run --with xlrd==2.0.1 python stage.py --setup")
-    src = src or next((os.path.join(RAW, f) for f in sorted(os.listdir(RAW))
-                       if f.endswith(".xls")), None) if os.path.isdir(RAW) else None
+            "xlrd 가 필요합니다(엑셀 경로만).  uv run --with xlrd==2.0.1 python stage.py --setup\n"
+            "  또는 키·의존성 없이:  python stage.py --fetch")
+    src = src or (next((os.path.join(RAW, f) for f in sorted(os.listdir(RAW))
+                        if f.endswith(".xls")), None) if os.path.isdir(RAW) else None)
     if not src:
         raise SystemExit(
-            f"{RAW} 에 사업장목록.xls 가 없음.\n"
-            "  정비사업 정보몽땅 → 사업장검색 → 엑셀다운로드 로 받아 여기에 두세요.")
+            f"{RAW} 에 사업장목록.xls 가 없음. 정보몽땅 엑셀다운로드로 받거나 --fetch 를 쓰세요.")
     sh = xlrd.open_workbook(src).sheet_by_index(0)
     hdr = [str(sh.cell_value(1, c)).strip() for c in range(sh.ncols)]
-    bjd_idx = _load_bjd()
-    rows, nopnu = [], 0
+    out = []
     for r in range(2, sh.nrows):
         d = dict(zip(hdr, [str(sh.cell_value(r, c)).strip() for c in range(sh.ncols)]))
-        if not d.get("사업장명"):
-            continue
+        if d.get("사업장명"):
+            d.setdefault("cafe", "")
+            d.setdefault("agz", "")
+            out.append(d)
+    return out
+
+
+def build(src: str = None, out: str = OUT, rows_in: list = None, 원천: str = "") -> str:
+    """목록(fetch) 또는 엑셀 → data/stages-seoul.json (대표지번 → PNU 조립)."""
+    src_rows = rows_in if rows_in is not None else _read_xls(src)
+    원천 = 원천 or (os.path.basename(src) if src else "사업장목록.xls")
+    bjd_idx = _load_bjd()
+    rows, nopnu = [], 0
+    for d in src_rows:
         gu, jibun = d.get("자치구", ""), d.get("대표지번", "")
-        stage = d.get("진행단계", "")
-        kind = d.get("사업구분", "")
+        stage, kind = d.get("진행단계", ""), d.get("사업구분", "")
         m = _JIBUN.match(jibun)
         bjd = pnu = ""
         if m:
@@ -164,12 +214,15 @@ def build(src: str = None, out: str = OUT) -> str:
             nopnu += 1
         rows.append([gu, kind, LAW.get(kind, "기타"), d.get("사업장명", ""), jibun,
                      stage, ORDER.get(stage, -1), d.get("운영구분", ""),
-                     d.get("운영단계", ""), bjd, pnu])
+                     d.get("운영단계", ""), bjd, pnu,
+                     d.get("cafe", ""), d.get("agz", "")])
     with open(out, "w", encoding="utf-8") as fh:
-        json.dump({"출처": SRC_DOC, "원천": os.path.basename(src),
-                   "사업장": len(rows), "PNU미조립": nopnu, "rows": rows},
+        json.dump({"출처": SRC_DOC, "원천": 원천, "사업장": len(rows), "PNU미조립": nopnu,
+                   "카페": sum(1 for r in rows if r[11]),
+                   "구역ID": sum(1 for r in rows if r[12]), "rows": rows},
                   fh, ensure_ascii=False, separators=(",", ":"))
-    return f"{out}  ({len(rows):,}건, PNU 미조립 {nopnu})"
+    return (f"{out}  ({len(rows):,}건 · PNU 미조립 {nopnu} · "
+            f"카페 {sum(1 for r in rows if r[11]):,} · 구역ID {sum(1 for r in rows if r[12]):,})")
 
 
 _CACHE = None
@@ -241,12 +294,13 @@ def match_zone(zone, sites=None, parcels=None) -> Optional[Site]:
     """고시도형 구역 ↔ 정보몽땅 사업장 매칭.
 
     위치가 이름보다 강한 신호다:
+      ⓪ 구역 ID(AGZ) 가 양쪽에 있으면 그것으로 확정
       ① 구역 안 필지 집합을 만들고, 대표지번이 거기 드는 사업장을 모은다
          (대표지번에 부번이 없으면 본번 단위로 넓히되 '느슨함'을 기억)
       ② 그중 이름 토큰('신림7' 등)이 맞는 것을 고른다
       ③ 양쪽에 번호가 있는데 하나도 안 맞으면 **붙이지 않는다**
          — 인접 구역이 같은 본번에 걸려 '봉천3 → 봉천4-1-2' 같은 오매칭이 난다
-      ④ 위치를 못 쓰면 이름 토큰이 유일하게 맞는 경우만
+      ④ 위치를 못 쓰면 이름 토큰이 유일하게 맞는 경우, 마지막으로 구역 ID(AGZ)
     """
     ss = sites if sites is not None else load()
     ztok = _tokens(zone.name)
@@ -288,7 +342,38 @@ def match_zone(zone, sites=None, parcels=None) -> Optional[Site]:
         if len({(c.name, c.stage) for c in cands}) == 1:
             return cands[0]
     cands = [s for s in ss if _norm(s.name) and (_norm(s.name) in zn or zn in _norm(s.name))]
-    return cands[0] if len(cands) == 1 else None
+    if len(cands) == 1:
+        return cands[0]
+
+    # ④ 마지막으로 구역 ID(AGZ). 정확 조인처럼 보이지만 구역이 분할되면
+    #    고시도형은 옛 경계('봉천6구역'), 사업장은 분할 후('봉천6-1구역')를 가리킨다.
+    #    그래서 이름·위치가 먼저고, 이건 최후 수단 — 어긋남은 match_note 로 드러낸다.
+    if getattr(zone, "agz", ""):
+        hit = [s for s in ss if s.agz == zone.agz]
+        if hit:
+            return hit[0] if len(hit) == 1 else max(hit, key=lambda s: s.rank)
+    return None
+
+
+def match_note(zone, site) -> Optional[str]:
+    """붙인 매칭이 미덥지 않은 이유. 없으면 None.
+
+    AGZ 가 같아도 구역이 쪼개졌으면 이름이 어긋난다(봉천6구역 ↔ 봉천6-1구역).
+    서울 실측: AGZ 조인 144건 중 130건은 이름도 일치, 14건은 분할·개명으로 어긋남.
+    """
+    if site is None:
+        return None
+    zt, mt = _tokens(zone.name), _tokens(site.name)
+    if zt and mt and not (zt & mt):
+        via = "구역ID(AGZ)" if getattr(zone, "agz", "") and zone.agz == site.agz else "위치"
+        return (f"{via} 로는 이어지지만 이름 번호가 다름 "
+                f"({'/'.join(sorted(zt))} vs {'/'.join(sorted(mt))}) "
+                "— 구역이 분할·개명됐을 수 있으니 사업장명을 확인하세요")
+    if getattr(zone, "family", "") and site.law not in ("기타",):
+        fam = {"재개발": "재개발", "재건축": "재건축"}.get(zone.family)
+        if fam and site.law in ("재개발", "재건축") and fam != site.law:
+            return f"구역은 {zone.family}인데 사업장은 {site.law} — 사업이 바뀌었는지 확인 필요"
+    return None
 
 
 # ── 출력 ──
@@ -313,12 +398,19 @@ def render(s: Site, detail: bool = True) -> str:
 
 def main(argv=None):
     p = argparse.ArgumentParser(description="정비사업 진행단계")
+    p.add_argument("--fetch", action="store_true",
+                   help="정보몽땅 목록을 직접 읽어 저장 (cafe·구역ID 포함, 의존성 없음)")
     p.add_argument("--setup", action="store_true", help="사업장목록.xls → data/stages-seoul.json")
     p.add_argument("--gu", help="자치구 (예: 관악구)")
     p.add_argument("--find", help="사업장명 검색")
     p.add_argument("--src", help="xls 경로 직접 지정")
     a = p.parse_args(argv)
 
+    if a.fetch:
+        rows = fetch_list()
+        print(f"목록 {len(rows):,}건 수신")
+        print("저장:", build(rows_in=rows, 원천="사업장검색 목록(직접 조회)"))
+        return
     if a.setup:
         print("저장:", build(a.src))
         return
