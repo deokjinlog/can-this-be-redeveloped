@@ -158,6 +158,11 @@ def run(keyword: str, mock: bool = False, unit: str = "road"):
                     g = f"{j.과소_lo:.1%}" if j.경계필지 == 0 else f"{j.과소_lo:.1%}~{j.과소_hi:.1%}"
                     print(f"       과소필지 {g} (기준 40%) · 필지 {j.필지:,}개 "
                           f"· 포착률 {j.포착률:.1%}")
+                if ag.접도율 is not None:
+                    print(f"       주택접도율 {ag.접도율:.1%} (기준 40% 이하) "
+                          f"— 지목 '도' 기준, 현황도로 미반영")
+                if ag.호수밀도 is not None:
+                    print(f"       호수밀도 {ag.호수밀도:,.0f}호/ha (기준 60호) — 정의 미검증 참고치")
             ph = aging.phase_signal(ag) if ag else None
             if ph:
                 print(f"    {ph[0]} 사업 단계 신호: {ph[1]}")

@@ -338,8 +338,10 @@ class Zone:
     family: str          # 재개발 / 재건축 / 촉진 / 소규모 / 주거환경 / 기타정비
     area: float          # DGM_AR (㎡) — 고시도형 실측
     sigungu: str
-    notice: str          # 고시번호
+    notice: str          # 고시번호 (NTFC_SN)
     created: str         # YYYYMMDD
+    agz: str = ""        # WTNNC_SN — 정보몽땅 구역 ID 와 같은 포맷(11000AGZ...).
+                         # 지금은 정보몽땅 목록 페이징이 막혀 못 긁지만, 얻는 즉시 정확 조인용.
     rings: list = field(default_factory=list)   # TM 평탄배열
     bbox: tuple = (0, 0, 0, 0)
     parts: int = 1                              # 분리 조각 수 (고시 하나가 떨어진 여러 필지군)
@@ -430,7 +432,7 @@ def build(src: str, out: str = ZONE_JSON) -> int:
             "name": r.get("DGM_NM", "").strip(), "code": code, "kind": KIND[code][0],
             "family": KIND[code][1], "area": area, "sigungu": r.get("SIGNGU_SE", ""),
             "notice": r.get("NTFC_SN", ""), "created": r.get("CREATE_DAT", ""),
-            "rings": rings,
+            "agz": (r.get("WTNNC_SN") or "").strip(), "rings": rings,
         })
 
     # ② 같은 고시(이름+코드+고시번호)의 분리 조각은 한 구역으로 병합 — 면적은 합산이 고시 면적
@@ -514,8 +516,8 @@ def load(path: str = ZONE_JSON) -> list[Zone]:
             "  2) python geo.py --setup <받은.zip>")
     d = json.load(open(path, encoding="utf-8"))
     _CACHE = [Zone(z["name"], z["code"], z["kind"], z["family"], z["area"], z["sigungu"],
-                   z["notice"], z["created"], z["rings"], tuple(z["bbox"]),
-                   z.get("parts", 1)) for z in d["zones"]]
+                   z["notice"], z["created"], z.get("agz", ""),
+                   z["rings"], tuple(z["bbox"]), z.get("parts", 1)) for z in d["zones"]]
     return _CACHE
 
 

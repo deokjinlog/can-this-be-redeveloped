@@ -32,6 +32,7 @@ parcel.py — 연속지적도(필지) → PNU·중심점·면적
 import argparse
 import glob
 import json
+import math
 import os
 from dataclasses import dataclass
 from typing import Optional
@@ -48,6 +49,16 @@ BAND_LO, BAND_HI = 1 / 1.115, 1 / 0.960          # ≈ 0.897 ~ 1.042
 BAND_SRC = "관악구 신림동 단일필지 9,664건 실측 90% 구간 (외필지 1+ 제외)"
 GWASO = 90.0          # 과소필지 기준 (서울 조례: 토지 90㎡ 미만)
 
+# 주택접도율 — 서울 조례: 폭 4m 이상 도로에 4m 이상 접한 건축물의 비율 (기준 40% 이하)
+ROAD_MIN_W = 4.0      # 도로 최소 폭 (m)
+TOUCH_MIN = 4.0       # 최소 접한 길이 (m)
+SNAP = 1.0            # 격자 해상도 (m) — 접한 길이를 이 단위로 센다
+SUB = 0.2             # 경계 샘플링 간격 (m). 격자보다 촘촘해야 맞닿은 선분을 안 놓친다
+JIMOK_ROAD = "도"     # 지적 지목 '도로'
+ROAD_NOTE = ("지목 '도' 기준 근사 — 사도·통행로 같은 **현황도로는 미반영**이라 "
+             "실제 접도율보다 낮게(=요건에 유리하게) 나올 수 있다. "
+             "도로 폭은 폴리곤에서 2×면적/둘레로 추정한 값이다.")
+
 
 @dataclass
 class Parcel:
@@ -56,6 +67,19 @@ class Parcel:
     area: float       # 도형 면적 ㎡ (참고도형)
     x: float          # 중심점 — BASE(EPSG:2097) 로 변환해 저장, 구역과 같은 좌표계
     y: float
+    jimok: str = ""   # 지목 한 글자 (대/도/천/임 …) — JIBUN 끝에서 파싱
+    touch: float = -1.0   # 폭 ROAD_MIN_W 이상 도로에 접한 길이(m). -1=미계산
+
+    @property
+    def 도로(self) -> bool:
+        return self.jimok == "도"
+
+    @property
+    def 접도(self) -> Optional[bool]:
+        """조례 접도 조건(폭 4m 도로에 4m 이상 접함) 충족 여부. None=미계산."""
+        if self.touch < 0:
+            return None
+        return self.touch >= TOUCH_MIN
 
     @property
     def bjd(self) -> str:
@@ -113,6 +137,50 @@ def _centroid(rings):
     return ax / (3 * A), ay / (3 * A)
 
 
+def _jimok(jibun: str) -> str:
+    j = (jibun or "").strip()
+    return j[-1] if j and "가" <= j[-1] <= "힣" else ""
+
+
+def _perimeter(rings) -> float:
+    t = 0.0
+    for r in rings:
+        n = len(r) // 2
+        for i in range(n):
+            j = (i + 1) % n
+            t += math.hypot(r[2 * j] - r[2 * i], r[2 * j + 1] - r[2 * i + 1])
+    return t
+
+
+def _sample(rings, step=SUB):
+    """폴리곤 경계를 step 간격으로 샘플링한 격자 좌표 집합.
+
+    지적도는 인접 필지가 꼭짓점을 공유하지 않는 경우가 있어, 꼭짓점만 비교하면
+    맞닿은 걸 놓친다. 경계를 따라 촘촘히 찍어 격자에 스냅하면 선분 겹침도 잡힌다.
+    """
+    pts = set()
+    for r in rings:
+        n = len(r) // 2
+        for i in range(n):
+            j = (i + 1) % n
+            x0, y0, x1, y1 = r[2 * i], r[2 * i + 1], r[2 * j], r[2 * j + 1]
+            d = math.hypot(x1 - x0, y1 - y0)
+            k = max(1, int(d / step))
+            for t in range(k + 1):
+                f = t / k
+                pts.add((round(x0 + (x1 - x0) * f), round(y0 + (y1 - y0) * f)))
+    return pts
+
+
+def _road_widths(items):
+    """도로 필지 → 추정 폭. 길쭉한 도형에서 2×면적/둘레 ≈ 폭."""
+    out = {}
+    for pnu, rings, area in items:
+        per = _perimeter(rings)
+        out[pnu] = (2 * area / per) if per > 0 else 0.0
+    return out
+
+
 def _crs_of(prj_path: str):
     """.prj 를 읽어 좌표계를 고른다 — 추측하지 않는다."""
     if not os.path.exists(prj_path):
@@ -146,7 +214,8 @@ def build(src: str = RAW, out_dir: str = None) -> list[str]:
         geoms = geo.read_shp_polygons(open(shp, "rb").read())
         if len(recs) != len(geoms):
             raise SystemExit(f"{os.path.basename(shp)}: DBF {len(recs)} vs SHP {len(geoms)}")
-        rows, sgg = [], ""
+        # ① 기본 속성
+        keep, sgg = [], ""
         for r, g in zip(recs, geoms):
             if not g:
                 continue
@@ -154,19 +223,45 @@ def build(src: str = RAW, out_dir: str = None) -> list[str]:
             if len(pnu) != 19:
                 continue
             sgg = sgg or pnu[:5]
+            jibun = (r.get("JIBUN") or "").strip()
+            keep.append((pnu, jibun, _jimok(jibun), g,
+                         abs(sum(_shoelace(x_) for x_ in g))))
+
+        # ② 접도 — 폭 4m 이상 도로 필지의 경계를 격자에 찍고, 각 필지가 몇 m 접하는지
+        roads = [(pnu, g, a) for pnu, _, jm, g, a in keep if jm == JIMOK_ROAD]
+        widths = _road_widths(roads)
+        wide = set()
+        for pnu, g, _a in roads:
+            if widths.get(pnu, 0) >= ROAD_MIN_W:
+                wide |= _sample(g)
+        touch = {}
+        for pnu, _jb, jm, g, _a in keep:
+            if jm == JIMOK_ROAD:
+                touch[pnu] = -1.0        # 도로 자신은 분모에서 뺀다
+                continue
+            hit = len(_sample(g) & wide)
+            touch[pnu] = round(max(0.0, (hit - 1) * SNAP), 1) if hit else 0.0
+
+        rows = []
+        for pnu, jibun, jm, g, area in keep:
             cx, cy = _centroid(g)
             x, y = geo.wgs84_to_tm(*geo.tm_to_wgs84(cx, cy, crs))   # → BASE(2097)
-            rows.append([pnu, (r.get("JIBUN") or "").strip(),
-                         round(abs(sum(_shoelace(x_) for x_ in g)), 1),
-                         round(x, 1), round(y, 1)])
+            rows.append([pnu, jibun, round(area, 1), round(x, 1), round(y, 1),
+                         jm, touch.get(pnu, -1.0)])
         path = os.path.join(out_dir, f"parcels-{sgg}.json")
         os.makedirs(out_dir, exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
             json.dump({"출처": SRC_DOC, "원천": os.path.basename(shp),
                        "좌표계": "EPSG:2097(변환 저장)", "원본좌표계": crs.name,
-                       "필지": len(rows), "rows": rows},
+                       "필지": len(rows), "도로필지": len(roads),
+                       "접도기준": {"도로폭": ROAD_MIN_W, "접한길이": TOUCH_MIN,
+                                 "샘플간격": SNAP, "주의": ROAD_NOTE},
+                       "rows": rows},
                       fh, ensure_ascii=False, separators=(",", ":"))
-        made.append(f"{path}  ({len(rows):,}필지, 원본 {crs.name})")
+            n_ok = sum(1 for r in rows if r[6] >= TOUCH_MIN)
+        n_calc = sum(1 for r in rows if r[6] >= 0)
+        made.append(f"{path}  ({len(rows):,}필지 · 도로 {len(roads):,} · "
+                    f"접도 판정 {n_calc:,} 중 충족 {n_ok:,})")
     return made
 
 
@@ -185,8 +280,11 @@ def load(sigungu: str = None) -> dict[str, Parcel]:
             "  python parcel.py --setup")
     out = {}
     for p in paths:
-        for pnu, jibun, area, x, y in json.load(open(p, encoding="utf-8"))["rows"]:
-            out[pnu] = Parcel(pnu, jibun, area, x, y)
+        for row in json.load(open(p, encoding="utf-8"))["rows"]:
+            pnu, jibun, area, x, y = row[:5]
+            jm = row[5] if len(row) > 5 else _jimok(jibun)
+            tc = row[6] if len(row) > 6 else -1.0
+            out[pnu] = Parcel(pnu, jibun, area, x, y, jm, tc)
     _CACHE[key] = out
     return out
 

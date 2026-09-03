@@ -170,7 +170,10 @@ def _address_payload(q: dict) -> dict:
                 out["aging"]["jijeok"] = {
                     "필지": j.필지, "면적합": round(j.면적합), "포착률": round(j.포착률, 4),
                     "과소_lo": round(j.과소_lo, 4), "과소_hi": round(j.과소_hi, 4),
-                    "경계필지": j.경계필지}
+                    "경계필지": j.경계필지, "도로필지": j.도로필지,
+                    "접도분모": j.접도분모, "접도충족": j.접도충족}
+            out["aging"]["접도율"] = ag.접도율
+            out["aging"]["호수밀도"] = ag.호수밀도
             ph = AG.phase_signal(ag)
             if ph:
                 out["phase"] = {"icon": ph[0], "label": ph[1], "why": ph[2]}

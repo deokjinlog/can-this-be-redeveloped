@@ -654,9 +654,13 @@ function adRender(d){
     if(g.area_lo>0) $("nohuA").value=(g.area_lo*100).toFixed(1);
     var jj=g.jijeok;
     if(jj && jj.필지 && jj.경계필지===0) $("gwaso").value=(jj.과소_lo*100).toFixed(1);
+    if(g["접도율"]!=null) $("jeopdo").value=(g["접도율"]*100).toFixed(1);
+    if(g["호수밀도"]!=null) $("hosu").value=Math.round(g["호수밀도"]);
     PROXY=false;   /* 구역 경계로 잰 값 → 잠정 아님 */
     $("ag-msg").textContent="✓ 구역 경계 안 실측 — 건물 "+g.total.toLocaleString()+"동 · 노후 "+
-      (g.lo*100).toFixed(1)+"%"+(jj?" · 필지 "+jj.필지.toLocaleString()+"개(포착 "+(jj.포착률*100).toFixed(1)+"%)":"");
+      (g.lo*100).toFixed(1)+"%"+(jj?" · 필지 "+jj.필지.toLocaleString()+"개(포착 "+(jj.포착률*100).toFixed(1)+"%)":"")+
+      (g["접도율"]!=null?" · 접도 "+(g["접도율"]*100).toFixed(1)+"%(지목 기준)":"")+
+      (g["호수밀도"]!=null?" · 호수밀도 "+Math.round(g["호수밀도"])+"호/ha(참고)":"");
   }
   else if(!d.designated && d.aging){
     $("nohu").value=(d.aging.lo*100).toFixed(1);

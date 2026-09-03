@@ -80,6 +80,7 @@ class Bldg:
     연면적: float
     대지면적: float
     세대수: int
+    가구수: int
     지상층수: int
     부속: bool
 
@@ -161,6 +162,7 @@ def load(path: Optional[str] = None) -> list[Bldg]:
                 연면적=_f(r.get("연면적(㎡)")),
                 대지면적=_f(r.get("대지면적(㎡)")),
                 세대수=_i(r.get("세대수(세대)")),
+                가구수=_i(r.get("가구수(가구)")),
                 지상층수=_i(r.get("지상층수")),
                 부속=(r.get("주부속구분코드명", "").strip() == "부속건축물"),
             ))
@@ -178,6 +180,9 @@ class Jijeok:
     과소_hi: float = 0.0
     경계필지: int = 0        # 밴드가 90㎡ 를 걸쳐 확정 못 한 필지
     포착률: float = 0.0      # 필지면적 합 / 고시면적 — 경계 추출 자기점검
+    도로필지: int = 0
+    접도분모: int = 0        # 접도 판정이 가능한 건물 수
+    접도충족: int = 0        # 폭4m 도로에 4m 이상 접한 건물 수
 
 
 @dataclass
@@ -202,6 +207,21 @@ class Aging:
     by_struct: dict = field(default_factory=dict)
     jijeok: Optional["Jijeok"] = None    # 구역 단위 집계일 때만
     zone_area: float = 0.0               # 고시면적 (구역 단위일 때)
+    호수: int = 0                        # 세대수 + 가구수 (호수밀도 분자, 정의 미검증)
+
+    @property
+    def 접도율(self) -> Optional[float]:
+        j = self.jijeok
+        if not j or not j.접도분모:
+            return None
+        return j.접도충족 / j.접도분모
+
+    @property
+    def 호수밀도(self) -> Optional[float]:
+        """ha 당 호수. 구역 면적을 알아야 계산된다."""
+        if not self.zone_area or not self.호수:
+            return None
+        return self.호수 / (self.zone_area / 10_000)
 
     # 동수 기준 노후도
     @property
@@ -311,7 +331,9 @@ def aggregate_zone(bldgs: list[Bldg], zone, parcels=None, 기준: str = "표준3
     ag.zone_area = zone.area
     lo, hi, edge = PARCEL.gwaso_ratio(hits)
     ag.jijeok = Jijeok(len(hits), sum(p.area for p in hits), lo, hi, edge,
-                       PARCEL.coverage(zone, hits))
+                       PARCEL.coverage(zone, hits),
+                       도로필지=sum(1 for p in hits if p.도로))
+    touch = {p.pnu: p.접도 for p in hits}
 
     seen = set()
     for b in bldgs:
@@ -321,6 +343,11 @@ def aggregate_zone(bldgs: list[Bldg], zone, parcels=None, 기준: str = "표준3
             continue
         ag.total += 1
         ag.세대수합 += max(b.세대수, 0)
+        ag.호수 += max(b.세대수, 0) + max(b.가구수, 0)
+        t = touch.get(b.pnu)
+        if t is not None:
+            ag.jijeok.접도분모 += 1
+            ag.jijeok.접도충족 += bool(t)
         yrs = b.경과연수(base)
         노후 = None if yrs is None else (yrs >= thr_fn(b))
         if 노후 is None:
@@ -400,7 +427,8 @@ def cross_check(ag: Aging, site) -> Optional[tuple[bool, str]]:
 
 def to_facts(ag: Aging) -> dict:
     """집계 → Fact. 구간이 확정될 때만 Fact 를 주고, 걸치면 None(=확인필요)."""
-    out = {"노후불량비율": None, "노후연면적비율": None, "과소필지비율": None}
+    out = {"노후불량비율": None, "노후연면적비율": None, "과소필지비율": None,
+           "접도율": None}
     span = (f"{ag.label} 주건축물 {ag.total}동 중 노후 {ag.old}동"
             f"{f' · 준공일 미상 {ag.unknown}동' if ag.unknown else ''} "
             f"(경과연수 기준 {ag.기준})")
@@ -425,6 +453,17 @@ def to_facts(ag: Aging) -> dict:
                 f"{ag.label} 필지 {j.필지:,}개 중 90㎡ 미만 {round(j.과소_lo*j.필지)}개"
                 + (f" (밴드 경계 {j.경계필지}개 제외)" if j.경계필지 else "")
                 + f" · 필지면적 합 {j.면적합:,.0f}㎡ = 고시면적의 {j.포착률:.0%}")
+    # 주택접도율 — 지목 '도' 기준 근사. 현황도로 미반영이라 실제보다 낮게 나올 수 있고,
+    # 낮을수록 요건에 '유리'하므로 기준선 근처에서는 발급하지 않는다(유리한 쪽 반올림 금지).
+    r = ag.접도율
+    if r is not None and j and j.접도분모 >= 10:
+        need = Cfg.JEOPDO_MAX
+        if abs(r - need) > 0.05:      # 기준선 ±5%p 밖일 때만 확정
+            out["접도율"] = Fact(
+                r, Grade.P1, PARCEL.SRC_DOC,
+                f"{ag.label} 건물 {j.접도분모:,}동 중 폭 {PARCEL.ROAD_MIN_W:.0f}m 도로에 "
+                f"{PARCEL.TOUCH_MIN:.0f}m 이상 접한 것 {j.접도충족:,}동 "
+                f"(구역 안 도로필지 {j.도로필지}) · {PARCEL.ROAD_NOTE}")
     return out
 
 
@@ -450,6 +489,7 @@ def to_area(ag: Aging, 면적: Optional[float] = None, 촉진: bool = False,
         노후불량비율=f["노후불량비율"],
         노후연면적비율=f["노후연면적비율"],
         과소필지비율=f["과소필지비율"],
+        접도율=f["접도율"],
         노후도_대리지표=proxy,
     )
 
@@ -485,6 +525,13 @@ def render_aging(ag: Aging, detail: bool = True) -> str:
                  + (f", 밴드 경계 {j.경계필지}개" if j.경계필지 else "") + "]")
         L.append(f"  · 필지면적 합 {j.면적합:,.0f}㎡ / 고시면적 {ag.zone_area:,.0f}㎡"
                  f" = 포착률 {j.포착률:.1%}  ← 경계 추출 자기점검")
+        if ag.접도율 is not None:
+            L.append(f"  · 주택접도율 {ag.접도율:.1%}   (선택요건 기준 {Cfg.JEOPDO_MAX:.0%} 이하)"
+                     f"  [{j.접도충족:,}/{j.접도분모:,}동, 구역 안 도로 {j.도로필지}필지]")
+            L.append(f"      └ 지목 '도' 기준 근사 — 현황도로(사도·통행로) 미반영")
+        if ag.호수밀도 is not None:
+            L.append(f"  · 호수밀도 {ag.호수밀도:,.0f}호/ha   (선택요건 기준 {Cfg.HOSU_DENSITY}호 이상)"
+                     f"  [{ag.호수:,}호 / {ag.zone_area/10000:.2f}ha]  — 정의 미검증, 참고치")
     elif ag.필지수:
         known = ag.필지수 - ag.필지면적미상
         if known:

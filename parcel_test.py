@@ -176,6 +176,79 @@ def c10():
     return f"{len(empty)}건 — 예: {empty[0][0][:22]} (필지 {empty[0][1]})"
 
 
+@case("⑪접도 — 도로 자신은 분모에서 빠지고, 대지는 판정된다")
+def c11():
+    ps = parcel.load("11620")
+    roads = [p for p in ps.values() if p.도로]
+    land = [p for p in ps.values() if not p.도로]
+    assert roads and land
+    assert all(p.touch < 0 for p in roads), "도로 필지가 접도 분모에 들어감"
+    calc = [p for p in land if p.접도 is not None]
+    assert len(calc) / len(land) > 0.95, len(calc) / len(land)
+    ok = sum(1 for p in calc if p.접도)
+    assert 0.2 < ok / len(calc) < 0.9, ok / len(calc)
+    return f"도로 {len(roads):,} 제외 · 대지 {len(calc):,} 중 충족 {ok/len(calc):.1%}"
+
+
+@case("⑫접도율은 구역별로 갈린다 — 산동네와 큰길가")
+def c12():
+    import aging
+    bl = aging.load()
+    ps = parcel.load("11620")
+    r = {}
+    for nm in ("신림1재정비촉진구역", "신림7 주택정비형 재개발사업"):
+        z = geo.search(nm)[0]
+        ag = aging.aggregate_zone(bl, z, ps)
+        r[nm] = ag.접도율
+    산 = r["신림1재정비촉진구역"]
+    길 = r["신림7 주택정비형 재개발사업"]
+    assert 산 is not None and 길 is not None, r
+    assert 산 < 0.20, 산
+    assert 길 > 0.50, 길
+    return f"신림1(산동네) {산:.1%} vs 신림7(큰길가) {길:.1%}"
+
+
+@case("⑬건물이 없는 구역은 접도율을 내지 않는다 (조례 분모=건축물)")
+def c13b():
+    import aging
+    bl = aging.load()
+    ps = parcel.load("11620")
+    z = geo.search("봉천3구역주택재개발사업")[0]
+    ag = aging.aggregate_zone(bl, z, ps)
+    assert ag.total == 0, ag.total
+    assert ag.접도율 is None, "철거된 구역에 접도율을 냄"
+    assert ag.jijeok.필지 > 0, "필지는 있어야 정상"
+    return f"필지 {ag.jijeok.필지}개 · 건물 0동 → 접도율 None"
+
+
+@case("⑭기준선 ±5%p 안이면 접도율 Fact 를 발급하지 않는다")
+def c13():
+    import aging
+    from criteria_engine import Cfg
+    ag = aging.Aging("정비구역", "t", "테스트", "표준30", True)
+    ag.zone_area = 20000
+    ag.jijeok = aging.Jijeok(100, 20000.0, 0, 0, 0, 1.0, 도로필지=10,
+                             접도분모=100, 접도충족=42)      # 42% — 기준 40% 에 근접
+    assert abs(ag.접도율 - 0.42) < 1e-9
+    assert aging.to_facts(ag)["접도율"] is None, "기준선 근처인데 확정 발급"
+    ag.jijeok.접도충족 = 20                                   # 20% — 확실히 충족
+    assert aging.to_facts(ag)["접도율"] is not None
+    return "42%(경계)→미발급 / 20%→발급"
+
+
+@case("⑮호수밀도는 정의가 미검증이라 Fact 를 주지 않는다")
+def c14():
+    import aging
+    bl = aging.load()
+    z = geo.search("신림1재정비촉진구역")[0]
+    ag = aging.aggregate_zone(bl, z, parcel.load("11620"))
+    assert ag.호수밀도 and ag.호수밀도 > 60, ag.호수밀도
+    assert "호수밀도" not in aging.to_facts(ag), "미검증 정의로 Fact 를 발급함"
+    a = aging.to_area(ag)
+    assert a.호수밀도 is None
+    return f"{ag.호수밀도:,.0f}호/ha 계산은 하되 판정엔 안 씀"
+
+
 passed = 0
 for name, fn in cases:
     try:
