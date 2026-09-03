@@ -78,6 +78,10 @@ class Case:
     기준일: date                         # 양수일 (판정 시점)
     기준일_기준: str = "미정"            # "계약일" | "등기일" | "미정"
     투기과열지구: Optional[bool] = None  # None=미확인
+    # §39② 본문의 시점 요건 — 이 단계 '전' 이면 제한 자체가 없다(8예외를 따질 필요 없음).
+    #   재건축: 조합설립인가 후 / 재개발: 관리처분계획인가 후
+    # value 는 (도달여부 bool, 현재단계 표시문자열). None = 미확인 → 지금까지처럼 제한 가정.
+    제한발동: Optional[Fact] = None
 
     취득일: Optional[Fact] = None        # 등기부 갑구 소유권 접수일 (date)
     거주개시일: Optional[Fact] = None    # 초본상 실거주 개시일 (합산 반영, date)
@@ -300,6 +304,27 @@ def evaluate(c: Case) -> Report:
                       notes=notes + ["투기과열지구 아님 → 조합원 지위 양도 제한 없음."])
     if c.투기과열지구 is None:
         notes.append("투기과열지구 지정 여부 미확인(정보몽땅/지정고시). 지정 가정하고 판정함.")
+
+    # §39② 시점 게이트 — 재건축은 조합설립인가 후, 재개발은 관리처분계획인가 후부터 제한.
+    # 그 전이면 제한이 아예 없으므로 8예외를 따지지 않는다(따지면 과잉 판정).
+    if c.제한발동 is not None and c.제한발동.value is False:
+        gate = "조합설립인가" if c.사업유형 == "재건축" else "관리처분계획인가"
+        req = Req(f"§39② 시점 요건({c.사업유형}: {gate} 후)", V.NOT_MET,
+                  value="아직 도래하지 않음 → 지위 양도 제한 없음",
+                  source_doc=c.제한발동.source_doc, source_span=c.제한발동.source_span,
+                  grade=c.제한발동.grade)
+        return Report(c, [ExResult("gate39", f"§39② 제한 미발동 — {gate} 전",
+                                   "도시정비법 §39② 본문", "공통", True, V.MET,
+                                   c.제한발동.grade, [req])],
+                      _OVERALL["가능"],
+                      notes=notes + [
+                          f"{c.사업유형} 은 {gate} **후** 양수부터 조합원 지위 승계가 제한된다"
+                          f"(§39② 본문). 현재는 그 전이라 8예외를 따질 필요가 없다.",
+                          "⚠ 단계는 기관 게시치(S1)다. 양수 시점까지 단계가 넘어가면 결론이 바뀐다 "
+                          "— 계약~잔금 사이 인가가 나는 경우가 실제로 문제된다.",
+                      ])
+    if c.제한발동 is not None and c.제한발동.value is True:
+        notes.append(f"§39② 제한 발동 상태({c.제한발동.source_span}) → 아래 8예외 중 하나가 필요.")
 
     exceptions = [
         _ex1_장기보유(c),

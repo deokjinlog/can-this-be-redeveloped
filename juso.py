@@ -8,9 +8,10 @@ juso.py — 주소 한 줄 → 법정동코드·지번·좌표 (도로명주소 
     lnbrMnnm/SlNo  = 지번 본번 / 부번            → gather.py 의 bun / ji
     entX / entY    = 좌표                        → geo.py 의 구역 판정
 
-키 2개가 필요하다(둘 다 무료·즉시발급, business.juso.go.kr → API신청하기):
-    JUSO_KEY        도로명주소 API   (주소검색)
-    JUSO_COORD_KEY  좌표제공 API     (좌표)
+**키는 선택이다.** 건물DB + 연속지적도를 내려받아 두면 addrdb.py 가 같은 일을 로컬에서 한다.
+우선순위: 키가 있으면 API, 없으면 로컬 폴백 → 둘 다 없으면 그때만 실패.
+    JUSO_KEY        도로명주소 API   (주소검색)   ↔ addrdb.search
+    JUSO_COORD_KEY  좌표제공 API     (좌표)      ↔ 연속지적도 필지 중심
 .env(gitignore) 에 넣는다. 커밋 금지.
 
 좌표제공 API 가 어느 좌표계로 주는지는 안내가 엇갈린다 → **추측하지 않는다.**
@@ -64,6 +65,7 @@ class Addr:
     lat: Optional[float] = None
     lon: Optional[float] = None
     crs: str = ""         # 좌표를 어느 좌표계로 해석했는지 (판별 결과)
+    via: str = "juso API" # 어디서 나온 값인지 (juso API / 로컬 건물DB)
 
     @property
     def sigungu(self) -> str:
@@ -102,15 +104,32 @@ def _get(url, params) -> dict:
         return json.loads(r.read().decode("utf-8"))
 
 
+def _from_local(q: str, n: int) -> list[Addr]:
+    """키 없이 — 내려받은 건물DB 로 해석."""
+    import addrdb
+    out = []
+    for h in addrdb.search(q, n=n):
+        out.append(Addr(roadAddr=h.road_addr, jibunAddr=h.jibun_addr, admCd=h.bjd,
+                        rnMgtSn=h.roadcd, udrtYn=h.ug, buldMnnm=h.bbun, buldSlno=h.bji,
+                        lnbrMnnm=h.bun, lnbrSlno=h.ji, bdNm=h.bldnm, via="로컬 건물DB"))
+    return out
+
+
 def search(keyword: str, mock: bool = False, n: int = 5) -> list[Addr]:
     if mock:
         d = _MOCK
     else:
         key = os.environ.get("JUSO_KEY")
         if not key:
-            raise SystemExit(
-                "JUSO_KEY 없음. business.juso.go.kr → API신청하기 → '도로명주소 API' 승인키를\n"
-                "  .env 에  JUSO_KEY=...  로 넣으세요 (무료·즉시발급). 흐름만 보려면 --mock.")
+            try:
+                hits = _from_local(keyword, n)
+            except SystemExit as e:
+                raise SystemExit(
+                    "주소를 해석할 방법이 없습니다. 둘 중 하나:\n"
+                    "  (a) 키 없이 — 건물DB 를 data/raw/juso/ 에 두고  python addrdb.py --setup 11620\n"
+                    "  (b) 키로   — business.juso.go.kr 승인키를 .env 에 JUSO_KEY=...\n"
+                    f"  (로컬 사유: {e})")
+            return hits
         d = _get(SEARCH_URL, {"confmKey": key, "currentPage": 1, "countPerPage": n,
                               "keyword": keyword, "resultType": "json"})
     common = d.get("results", {}).get("common", {})
@@ -142,8 +161,29 @@ def _gu_box(sigungu: str):
     return (sum(la) / len(la), sum(lo) / len(lo))
 
 
+def _coord_local(a: Addr) -> bool:
+    """연속지적도 필지 중심으로 좌표를 채운다. 성공 여부 반환."""
+    try:
+        import parcel
+    except ImportError:
+        return False
+    sgg = a.sigungu
+    if not parcel.have(sgg):
+        a.crs = f"미확인(좌표API 키 없음 · 연속지적도 {sgg} 도 없음)"
+        return False
+    pnu = parcel.pnu_of(sgg, a.bjdong, a.bun, a.ji)
+    p = parcel.load(sgg).get(pnu)
+    if p is None:
+        a.crs = f"미확인(PNU {pnu} 가 연속지적도에 없음)"
+        return False
+    a.lat, a.lon = p.wgs84()
+    a.crs = "연속지적도 필지 중심"
+    return True
+
+
 def coord(a: Addr, mock: bool = False) -> Addr:
-    """좌표제공 API → entX/entY → 좌표계 판별 → a.lat/a.lon 채움."""
+    """좌표제공 API → entX/entY → 좌표계 판별 → a.lat/a.lon 채움.
+    키가 없으면 연속지적도 필지 중심으로 대체한다."""
     if mock:
         # 판별기까지 함께 확인하려고, 실제 신림동 좌표를 5186 으로 만들어 흘린다.
         x, y = geo.wgs84_to_tm(37.484201, 126.929715, geo.EPSG_5186)
@@ -151,7 +191,7 @@ def coord(a: Addr, mock: bool = False) -> Addr:
     else:
         key = os.environ.get("JUSO_COORD_KEY")
         if not key:
-            a.crs = "미확인(JUSO_COORD_KEY 없음)"
+            _coord_local(a)
             return a
         d = _get(COORD_URL, {"confmKey": key, "admCd": a.admCd, "rnMgtSn": a.rnMgtSn,
                              "udrtYn": a.udrtYn, "buldMnnm": a.buldMnnm,
@@ -196,9 +236,10 @@ def render(a: Addr) -> str:
          f"  법정동코드: {a.admCd}  →  시군구 {a.sigungu} / 법정동 {a.bjdong}  ({a.자치구})",
          f"  지번코드: 본번 {a.bun} / 부번 {a.ji}   → 건축물대장 조회에 그대로 투입"]
     if a.lat is not None:
-        L.append(f"  좌표: {a.lat:.6f}, {a.lon:.6f}   [{a.crs} 로 판별]")
+        L.append(f"  좌표: {a.lat:.6f}, {a.lon:.6f}   [{a.crs}]")
     else:
         L.append(f"  좌표: {a.crs or '미확인'} — 구역 판정은 건너뜀")
+    L.append(f"  경로: {a.via}")
     return "\n".join(L)
 
 

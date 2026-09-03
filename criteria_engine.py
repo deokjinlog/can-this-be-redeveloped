@@ -127,7 +127,7 @@ def _building_old(b: Building) -> Req:
     yrs = (_BASE - b.준공일.value).days / 365.25
     need = Cfg.OLD_YEARS_RC if b.구조 == "RC공동주택" else Cfg.OLD_YEARS_ETC
     return Req("내 건물 노후 여부(경과연수)", V.MET if yrs >= need else V.NOT_MET,
-               value=f"준공 {b.준공일.value} → {yrs:.0f}년 (기준 {need}년)",
+               value=f"준공 {b.준공일.value} → {yrs:.1f}년 (기준 {need}년)",
                source_doc=b.준공일.source_doc, source_span=b.준공일.source_span,
                grade=b.준공일.grade, kind="참고")
 

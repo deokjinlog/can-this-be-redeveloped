@@ -11,3 +11,6 @@ __pycache__/
 
 # 원천 SHP zip — geo.py --fetch 로 언제든 다시 받는다. 변환본(data/zones-seoul.json)만 커밋.
 data/_src-*.zip
+
+# 원천 대용량 (브이월드 SHP · juso 건물DB) — 각자 내려받아 data/raw/ 에 풀 것. 가공본만 커밋.
+data/raw/

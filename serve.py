@@ -137,10 +137,51 @@ def _address_payload(q: dict) -> dict:
         out["building"] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
         warn.append(f"건축물대장: {type(e).__name__}")
 
-    # 노후도 — 이미 지정된 구역이면 다시 셀 이유가 없다
-    out["aging"] = None
-    if not out["designated"]:
+    # 진행단계 (정보몽땅) — C게이트 §39② 시점 요건까지 여기서 판정된다
+    out["site"] = None
+    if body is not None:
         try:
+            import stage
+            st = stage.match_zone(body)
+            if st:
+                gate, why = st.승계제한
+                out["site"] = {"name": st.name, "kind": st.kind, "law": st.law,
+                               "stage": st.stage, "rank": st.rank,
+                               "진행률": st.진행률, "op": st.op,
+                               "gate": gate, "why": why}
+        except SystemExit as e:
+            warn.append(f"진행단계: {e}")
+        except Exception as e:
+            warn.append(f"진행단계: {type(e).__name__}: {e}")
+
+    # 노후도 — 구역이 있으면 그 경계 안 실측(대리지표 아님), 없으면 길 단위
+    out["aging"] = None
+    out["agingZone"] = False
+    out["phase"] = None
+    try:
+        if body is not None:
+            if "bldgs" not in _AG_CACHE:
+                _AG_CACHE["bldgs"] = AG.load()
+            ag = AG.aggregate_zone(_AG_CACHE["bldgs"], body)
+            out["aging"] = _ag_row(ag)
+            out["agingZone"] = True
+            j = ag.jijeok
+            if j:
+                out["aging"]["jijeok"] = {
+                    "필지": j.필지, "면적합": round(j.면적합), "포착률": round(j.포착률, 4),
+                    "과소_lo": round(j.과소_lo, 4), "과소_hi": round(j.과소_hi, 4),
+                    "경계필지": j.경계필지}
+            ph = AG.phase_signal(ag)
+            if ph:
+                out["phase"] = {"icon": ph[0], "label": ph[1], "why": ph[2]}
+                if out["site"]:
+                    import stage as _stg
+                    st_obj = next((x for x in _stg.load()
+                                   if x.name == out["site"]["name"]), None)
+                    cc = AG.cross_check(ag, st_obj) if st_obj else None
+                    if cc:
+                        out["phase"]["cross"] = {"ok": cc[0], "text": cc[1]}
+        else:
             buckets = _aging_buckets("road")
             ag = buckets.get(a.rnMgtSn)
             if ag is None:
@@ -149,8 +190,10 @@ def _address_payload(q: dict) -> dict:
             out["aging"] = _ag_row(ag) if ag else None
             if ag is None:
                 warn.append("이 주소의 도로·지번블록은 가진 표제부 CSV 범위 밖")
-        except SystemExit as e:
-            warn.append(f"노후도: {e}")
+    except SystemExit as e:
+        warn.append(f"노후도: {e}")
+    except Exception as e:
+        warn.append(f"노후도: {type(e).__name__}: {e}")
     out["warn"] = warn
     return out
 
