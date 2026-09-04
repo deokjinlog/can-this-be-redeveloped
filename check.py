@@ -99,10 +99,15 @@ def run(keyword: str, mock: bool = False, unit: str = "road",
         print("    ⚪ 지정된 정비구역·촉진지구 안이 아님 → 아래 요건으로 '될 수 있나'를 본다")
     else:
         for z in zones:
-            print(f"    🟢 {z.kind} · {z.name}  {z.area:,.0f}㎡"
-                  + (f"  (조각 {z.parts}개 합산)" if z.parts > 1 else ""))
+            mark = "" if z.현행 else "  ⚠ 과거 세대"
+            print(f"    {'🟢' if z.현행 else '⚪'} {z.kind} · {z.name}  {z.area:,.0f}㎡"
+                  + (f"  (조각 {z.parts}개 합산)" if z.parts > 1 else "") + mark)
             if z.notice:
-                print(f"        고시 {z.notice} · 도형 {z.created}")
+                print(f"        고시 {z.notice}"
+                      + (f" ({z.notice_date})" if z.notice_date else "")
+                      + f" · 도형 {z.created}")
+            if not z.현행:
+                print(f"        → 같은 땅을 더 최근 고시가 덮음: {z.superseded_by}")
     print()
 
     # ── 2b. 진행단계 (정보몽땅) ──
@@ -162,6 +167,10 @@ def run(keyword: str, mock: bool = False, unit: str = "road",
             print("[4] 구역 경계 안 실측 (연속지적 필지 → 대장 건물)")
             if ag is None:
                 print("    ⚪ 연속지적도가 없어 구역 안 집계 불가 (python parcel.py --setup)")
+            elif ag.범위밖:
+                j = ag.jijeok
+                print(f"    ⚪ 구역 안 필지 {j.필지 if j else 0:,}개 — 다만 이 구역은 가진 "
+                      f"표제부 CSV 의 법정동 밖이라 건물 집계 불가(자료 없음)")
             elif ag.total == 0:
                 j = ag.jijeok
                 print(f"    ⚪ 구역 안 필지 {j.필지 if j else 0:,}개인데 대장 건물이 0동")

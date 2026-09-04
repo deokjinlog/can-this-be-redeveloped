@@ -658,7 +658,10 @@ function adRender(d){
       ' <span style="color:var(--ink-2)">('+esc(d.zoneKind)+')</span>'+
       (d.promo?' · 재정비촉진지구 안':'')+
       '<div class="meta">면적 '+Math.round(d.zoneArea).toLocaleString()+'㎡'+
-      (d.notice?' · 고시 '+esc(d.notice):'')+' · 지정요건은 행정청이 이미 심사·인정</div>'+
+      (d.notice?' · 고시 '+esc(d.notice):'')+(d.noticeDate?' ('+esc(d.noticeDate)+')':'')+
+      ' · 지정요건은 행정청이 이미 심사·인정</div>'+
+      (d.superseded?'<div class="warn">⚠ 같은 땅을 더 최근 고시가 덮었습니다 — 과거 세대일 수 있음: '+esc(d.superseded)+'</div>':'')+
+      (d.outOfCsv?'<div class="warn">⚠ 이 구역은 가진 표제부 CSV 의 법정동 밖 — 건물 수치는 \'없음\' 이 아니라 \'자료 없음\'</div>':'')+
       '<div class="warn">⚠ 해제·변경 이력은 이 자료로 확인 불가 — 정보몽땅·자치구 고시 확인 필요</div></div>');
   }else if(d.promo){
     L.push('<div class="zbanner off">⚪ 개별 정비구역은 미지정 · <b>'+esc(d.zoneName||"재정비촉진지구")+

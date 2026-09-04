@@ -207,6 +207,7 @@ class Aging:
     by_struct: dict = field(default_factory=dict)
     jijeok: Optional["Jijeok"] = None    # 구역 단위 집계일 때만
     zone_area: float = 0.0               # 고시면적 (구역 단위일 때)
+    범위밖: bool = False                  # 구역이 가진 표제부 CSV 의 법정동 밖에 있다
     호수: int = 0                        # 세대수 + 가구수 (호수밀도 분자, 정의 미검증)
 
     @property
@@ -326,9 +327,15 @@ def aggregate_zone(bldgs: list[Bldg], zone, parcels=None, 기준: str = "표준3
     hits = PARCEL.in_zone(zone, ps)
     pnus = {p.pnu for p in hits}
 
+    # 구역이 CSV 범위(담고 있는 법정동) 밖이면 '건물 0동' 은 철거가 아니라 자료 없음이다.
+    have = {b.pnu[:10] for b in bldgs if b.pnu}
+    zone_bjd = {p.pnu[:10] for p in hits}
+    밖 = bool(zone_bjd) and not (zone_bjd & have)
+
     thr_fn, verified, _ = THRESHOLDS[기준]
     ag = Aging("정비구역", zone.name, zone.name, 기준, verified)
     ag.zone_area = zone.area
+    ag.범위밖 = 밖
     lo, hi, edge = PARCEL.gwaso_ratio(hits)
     ag.jijeok = Jijeok(len(hits), sum(p.area for p in hits), lo, hi, edge,
                        PARCEL.coverage(zone, hits),
@@ -379,6 +386,8 @@ def phase_signal(ag: Aging) -> Optional[tuple[str, str, str]]:
     """
     if ag.unit != "정비구역":
         return None
+    if ag.범위밖:
+        return None          # 자료가 없는 것을 '철거' 로 읽지 않는다
     j = ag.jijeok
     필지 = j.필지 if j else 0
     if 필지 < 5:
@@ -557,6 +566,9 @@ def render_aging(ag: Aging, detail: bool = True) -> str:
         L += ["", f"  {ph[0]} 사업 단계 신호: {ph[1]}",
               f"      근거: {ph[2]}",
               "      ⚠ 추정입니다 — 조합설립·사업시행인가 등 실제 단계는 정보몽땅·자치구 고시로 확인."]
+    if ag.범위밖:
+        L += ["", "  ⚪ 이 구역은 가진 표제부 CSV 의 법정동 밖입니다 — 건물 수치는 '없음' 이",
+              "     아니라 '자료 없음' 입니다. 그 동의 표제부 CSV 를 받아야 집계됩니다."]
     if ag.unit == "정비구역":
         L += ["",
               "  ✅ 집계 범위가 곧 고시된 정비구역 경계입니다 — 대리지표가 아니라 요건 그 값.",

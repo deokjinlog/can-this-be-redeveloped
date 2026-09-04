@@ -79,7 +79,9 @@ def _aging_payload(q: dict) -> dict:
 
 def _zone_row(z) -> dict:
     return {"name": z.name, "kind": z.kind, "family": z.family, "area": z.area,
-            "notice": z.notice, "created": z.created, "parts": z.parts, "gu": z.gu}
+            "notice": z.notice, "notice_date": z.notice_date, "created": z.created,
+            "parts": z.parts, "gu": z.gu,
+            "current": z.현행, "superseded_by": z.superseded_by}
 
 
 def _address_payload(q: dict) -> dict:
@@ -126,6 +128,9 @@ def _address_payload(q: dict) -> dict:
     out["zoneName"] = body.name if body else (promo.name if promo else None)
     out["zoneKind"] = body.kind if body else (promo.kind if promo else None)
     out["notice"] = body.notice if body else None
+    out["noticeDate"] = body.notice_date if body else None
+    out["superseded"] = (body.superseded_by if body and not body.현행 else None)
+    out["outOfCsv"] = False
 
     # 건축물대장
     try:
@@ -174,6 +179,7 @@ def _address_payload(q: dict) -> dict:
             ag = AG.aggregate_zone(_AG_CACHE["bldgs"], body)
             out["aging"] = _ag_row(ag)
             out["agingZone"] = True
+            out["outOfCsv"] = ag.범위밖
             j = ag.jijeok
             if j:
                 out["aging"]["jijeok"] = {

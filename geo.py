@@ -319,6 +319,9 @@ KIND = {
 # 우리가 판정에 쓰는 계열만 추출 (나머지 산업단지·보전산지 등은 버림)
 KEEP = tuple(KIND)
 
+# 세대 판별의 면적비 하한 — 상호 포함과 함께 쓰는 보조 조건
+AREA_RATIO = 0.70
+
 SIGUNGU = {
     "11000": "서울특별시(시 결정)", "11110": "종로구", "11140": "중구", "11170": "용산구",
     "11200": "성동구", "11215": "광진구", "11230": "동대문구", "11260": "중랑구",
@@ -340,8 +343,8 @@ class Zone:
     sigungu: str
     notice: str          # 고시번호 (NTFC_SN)
     created: str         # YYYYMMDD
-    agz: str = ""        # WTNNC_SN — 정보몽땅 구역 ID 와 같은 포맷(11000AGZ...).
-                         # 지금은 정보몽땅 목록 페이징이 막혀 못 긁지만, 얻는 즉시 정확 조인용.
+    agz: str = ""        # WTNNC_SN — 정보몽땅 구역 ID 와 같은 포맷(11620AGZ...)
+    superseded_by: str = ""   # 같은 땅에 더 최근 고시가 있으면 그 구역명 (= 이건 과거 세대)
     rings: list = field(default_factory=list)   # TM 평탄배열
     bbox: tuple = (0, 0, 0, 0)
     parts: int = 1                              # 분리 조각 수 (고시 하나가 떨어진 여러 필지군)
@@ -353,6 +356,20 @@ class Zone:
     @property
     def 촉진(self) -> bool:
         return self.family == "촉진"
+
+    @property
+    def notice_date(self) -> Optional[str]:
+        """고시번호에 박힌 고시일자 (11620NTC20241014xxxx → 2024-10-14)."""
+        m = re.match(r"^\d{5}NTC(\d{8})", self.notice or "")
+        if not m:
+            return None
+        d = m.group(1)
+        return f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+
+    @property
+    def 현행(self) -> bool:
+        """같은 땅을 더 최근 고시가 덮었으면 과거 세대다."""
+        return not self.superseded_by
 
     def center_wgs84(self):
         x = (self.bbox[0] + self.bbox[2]) / 2
@@ -377,6 +394,74 @@ class Zone:
 
     def contains(self, lat: float, lon: float) -> bool:
         return self.contains_tm(*wgs84_to_tm(lat, lon))
+
+
+def _repr_point(rings, bbox):
+    """구역 대표점 — bbox 중심이 폴리곤 안이면 그것, 아니면 첫 링 무게중심."""
+    cx, cy = (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
+    if _pip(rings, cx, cy):
+        return cx, cy
+    r = rings[0]
+    n = len(r) // 2
+    return sum(r[0::2]) / n, sum(r[1::2]) / n
+
+
+def _pip(rings, x, y) -> bool:
+    inside = False
+    for r in rings:
+        n = len(r) // 2
+        j = n - 1
+        for i in range(n):
+            xi, yi = r[2 * i], r[2 * i + 1]
+            xj, yj = r[2 * j], r[2 * j + 1]
+            if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+                inside = not inside
+            j = i
+    return inside
+
+
+def _mark_generations(zones: list) -> int:
+    """같은 땅에 겹치는 구역들 중 **최신 고시**를 현행으로 삼고 나머지에 표시.
+
+    고시도형은 이력을 함께 담고 있어, 준공된 옛 사업과 현행 구역이 한 땅에 겹친다
+    (신림재정비촉진지구2구역주택재개발 2009 ↔ 신림2재정비촉진구역 2025).
+    이걸 구분하지 않으면 진행단계·노후도 매칭이 엉뚱한 세대를 짚는다.
+
+    판별은 보수적으로: **서로의 대표점이 상대 안**(상호 포함)이고 **면적비가 0.8~1.25**
+    일 때만 같은 땅의 다른 세대로 본다. 촉진지구는 상위 레이어라 제외한다.
+    (면적비를 좁게 잡으면 신림1구역 2007 ↔ 신림1재정비촉진구역 2024 같은 쌍을 놓치고,
+     넓게 잡으면 분할 관계까지 삼킨다 — 상호 포함이라는 강한 조건과 함께 쓴다.)
+    """
+    body = [z for z in zones if z["family"] in ("재개발", "재건축", "주거환경", "소규모", "기타정비")]
+    pts = {}
+    for z in body:
+        z["_pt"] = _repr_point(z["rings"], z["bbox"])
+    n = 0
+    for i, a in enumerate(body):
+        for b in body[i + 1:]:
+            if not (a["area"] and b["area"]):
+                continue
+            ratio = a["area"] / b["area"]
+            if not (AREA_RATIO <= ratio <= 1 / AREA_RATIO):
+                continue
+            ax0, ay0, ax1, ay1 = a["bbox"]
+            bx0, by0, bx1, by1 = b["bbox"]
+            if ax1 < bx0 or bx1 < ax0 or ay1 < by0 or by1 < ay0:
+                continue
+            if not (_pip(b["rings"], *a["_pt"]) and _pip(a["rings"], *b["_pt"])):
+                continue
+            da, db = a.get("notice_date") or "", b.get("notice_date") or ""
+            if da == db:
+                continue
+            old, new = (a, b) if da < db else (b, a)
+            if not old.get("superseded_by") or (new.get("notice_date") or "") > old.get("_sup_date", ""):
+                old["superseded_by"] = new["name"]
+                old["_sup_date"] = new.get("notice_date") or ""
+                n += 1
+    for z in body:
+        z.pop("_pt", None)
+        z.pop("_sup_date", None)
+    return n
 
 
 def _bbox(rings):
@@ -420,7 +505,8 @@ def build(src: str, out: str = ZONE_JSON) -> int:
         if code not in KIND or not g:
             continue
         rings = [[round(v) for v in ring] for ring in g]     # 1m 격자 (구역 판정엔 충분)
-        h = (code, r.get("DGM_NM", "").strip(), r.get("NTFC_SN", ""), hash(tuple(map(tuple, rings))))
+        nm_key = re.sub(r"[\s_·]", "", r.get("DGM_NM", ""))
+        h = (code, nm_key, r.get("NTFC_SN", ""), hash(tuple(map(tuple, rings))))
         if h in seen:
             continue
         seen.add(h)
@@ -454,12 +540,18 @@ def build(src: str, out: str = ZONE_JSON) -> int:
         z = merged[k]
         z["area"] = round(z["area"], 2)
         z["bbox"] = [round(v) for v in _bbox(z["rings"])]
+        m = re.match(r"^\d{5}NTC(\d{8})", z.get("notice") or "")
+        z["notice_date"] = (f"{m.group(1)[:4]}-{m.group(1)[4:6]}-{m.group(1)[6:8]}"
+                            if m else None)
+        z["superseded_by"] = ""
         zones.append(z)
+    n_sup = _mark_generations(zones)
 
     os.makedirs(os.path.dirname(os.path.abspath(out)) or ".", exist_ok=True)
     with open(out, "w", encoding="utf-8") as fh:
         json.dump({"출처": SRC_DOC, "좌표계": "EPSG:2097",
                    "원천레코드": len(recs), "정비계열": len(raw), "구역": len(zones),
+                   "과거세대": n_sup,
                    "zones": zones}, fh, ensure_ascii=False, separators=(",", ":"))
     return len(zones)
 
@@ -517,6 +609,7 @@ def load(path: str = ZONE_JSON) -> list[Zone]:
     d = json.load(open(path, encoding="utf-8"))
     _CACHE = [Zone(z["name"], z["code"], z["kind"], z["family"], z["area"], z["sigungu"],
                    z["notice"], z["created"], z.get("agz", ""),
+                   z.get("superseded_by", ""),
                    z["rings"], tuple(z["bbox"]), z.get("parts", 1)) for z in d["zones"]]
     return _CACHE
 
@@ -562,7 +655,10 @@ def pick(hits: list[Zone]) -> tuple[Optional[Zone], Optional[Zone]]:
     """
     bodies = [z for z in hits if z.family in _BODY]
     promo = next((z for z in hits if z.family == "촉진"), None)
-    body = min(bodies, key=lambda z: z.area) if bodies else None
+    # 같은 땅에 더 최근 고시가 있는 구역(과거 세대)은 뒤로 미룬다
+    현행 = [z for z in bodies if z.현행]
+    pool = 현행 or bodies
+    body = min(pool, key=lambda z: z.area) if pool else None
     return body, promo
 
 

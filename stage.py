@@ -307,11 +307,13 @@ def match_zone(zone, sites=None, parcels=None) -> Optional[Site]:
     zn = _norm(zone.name)
 
     inside, exact = [], []
+    located = False          # 이 구역에 대해 '위치로 판정할 수 있었는가'
     try:
         import parcel as PARCEL
         ps = parcels if parcels is not None else PARCEL.load(
             zone.sigungu if zone.sigungu != "11000" else None)
         hits = PARCEL.in_zone(zone, ps)
+        located = len(hits) >= 3
         pnus = {p.pnu for p in hits}
         bons = {p.pnu[:15] for p in hits}
         pool_sites = (by_sigungu(zone.sigungu, ss)
@@ -336,6 +338,12 @@ def match_zone(zone, sites=None, parcels=None) -> Optional[Site]:
         if not exact:
             return None          # 정확 지번도 아니고 이름 확인도 못 함 → 미상
         return exact[0] if len(exact) == 1 else max(exact, key=lambda s: s.rank)
+
+    # 위치로 판정할 수 있었는데(구역 안 필지를 찾았는데) 대표지번이 하나도 안 들어왔다면,
+    # 그건 '이 구역에 대응하는 현행 사업장이 없다' 는 뜻이다. 이름으로 억지로 붙이면
+    # 다른 땅의 같은 번호 구역에 매달린다(신림1구역 2007 준공 → 신림1재정비촉진구역 조합).
+    if located:
+        return None
 
     if ztok:
         cands = [s for s in ss if ztok & _tokens(s.name)]

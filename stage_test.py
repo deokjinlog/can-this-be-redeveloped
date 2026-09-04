@@ -226,13 +226,17 @@ def c14():
     agz_z = {z.agz for z in zs if z.agz}
     agz_s = {s.agz for s in ss if s.agz}
     assert len(agz_z & agz_s) > 100, len(agz_z & agz_s)
-    # 이름 토큰이 맞는 사업장이 따로 있으면 AGZ 보다 그쪽이 우선이어야 한다
+    # 번호가 어긋난 쌍에는 반드시 경고가 붙는다 (조용히 붙지 않는다)
     z = next(x for x in zs if x.name == "봉천6구역주택재개발사업")
-    m = stage.match_zone(z, ss)
-    assert m is not None
-    note = stage.match_note(z, m)
+    s2 = next(x for x in ss if "봉천6-1" in x.name)
+    note = stage.match_note(z, s2)
     assert note and "이름 번호가 다름" in note, note
-    return f"AGZ 교집합 {len(agz_z & agz_s)}건 · 어긋나면 경고를 단다"
+    # 위치로 판정할 수 있었는데 대응 사업장이 없으면 이름으로 억지로 붙이지 않는다
+    import parcel
+    ps = parcel.load("11620")
+    z2 = next(x for x in zs if x.name == "신림1구역주택재개발사업")
+    assert stage.match_zone(z2, ss, ps) is None, "위치로 못 찾았는데 이름으로 붙음"
+    return f"AGZ 교집합 {len(agz_z & agz_s)}건 · 어긋남엔 경고 · 위치 실패 시 미상"
 
 
 @case("⑮목록 직접 조회 — cafe·구역ID 가 실려 있다")
