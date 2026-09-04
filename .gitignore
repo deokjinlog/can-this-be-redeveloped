@@ -14,3 +14,7 @@ data/_src-*.zip
 
 # 원천 대용량 (브이월드 SHP · juso 건물DB) — 각자 내려받아 data/raw/ 에 풀 것. 가공본만 커밋.
 data/raw/
+
+# UI 테스트용 개발 의존 (판정 엔진은 표준 라이브러리만)
+node_modules/
+package-lock.json

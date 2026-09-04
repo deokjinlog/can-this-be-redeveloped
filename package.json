@@ -1,0 +1,8 @@
+{
+  "name": "can-this-be-redeveloped-uitest",
+  "private": true,
+  "type": "module",
+  "description": "웹 UI 회귀 테스트 전용. 판정 엔진(파이썬)은 표준 라이브러리만 쓴다.",
+  "scripts": { "test": "node ui_test.mjs" },
+  "devDependencies": { "jsdom": "^24.0.0" }
+}

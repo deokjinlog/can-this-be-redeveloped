@@ -573,7 +573,9 @@ document.querySelectorAll("#claims .chip").forEach(function(c){c.addEventListene
 document.querySelectorAll(".preset").forEach(function(b){b.addEventListener("click",function(){applyPreset(b.dataset.p)})});
 $("theme").addEventListener("click",function(){
   var r=document.documentElement, cur=r.getAttribute("data-theme");
-  var next=cur==="dark"?"light":cur==="light"?"dark":(matchMedia("(prefers-color-scheme:dark)").matches?"light":"dark");
+  var prefersDark=false;
+  try{ prefersDark=!!(window.matchMedia&&window.matchMedia("(prefers-color-scheme:dark)").matches); }catch(e){}
+  var next=cur==="dark"?"light":cur==="light"?"dark":(prefersDark?"light":"dark");
   r.setAttribute("data-theme",next);
 });
 $("af-btn").addEventListener("click",function(){
@@ -626,7 +628,13 @@ var ANCHORS=null;
 function dualCheck(){
   var box=$("dualBox"); if(!box) return;
   var g=$("gyeyak").value, d=$("deunggi").value;
-  if(!ANCHORS||!g||!d){box.innerHTML="";return}
+  if(!g||!d){box.innerHTML="";return}
+  if(!ANCHORS){
+    box.innerHTML='<div class="dual same">양수 시점 비교: 인가 일자를 몰라 판별 보류'+
+      ' <span class="ln">— 위에서 주소를 조회하면 그 구역의 인가일로 계약↔등기 사이에 '+
+      '결론이 갈리는지 봅니다</span></div>';
+    return;
+  }
   var law=(GATE&&GATE.law)||$("type").value;
   var key=(law==="재건축")?"조합설립인가일":"관리처분인가일";
   var ing=ANCHORS[key];
