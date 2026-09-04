@@ -283,6 +283,8 @@ a{color:var(--accent)}
             <div class="f"><label>내 등기(잔금)일</label><input id="deunggi" type="date"></div>
           </div>
           <div id="dualBox"></div>
+          <label class="chk"><input type="checkbox" id="onehouse" checked>매도인이 1세대 1주택자
+            <span class="hint">(§39②4호 요건 — 다주택이면 장기보유 예외 불성립)</span></label>
           <div class="row">
             <div class="f"><label>매도인 취득연도</label><input id="own" type="number" placeholder="미확인" value="2011"></div>
             <div class="f"><label>매도인 거주 시작연도</label><input id="reside" type="number" placeholder="미확인" value="2013"><span class="hint">배우자·직계존비속 합산 반영</span></div>
@@ -299,7 +301,9 @@ a{color:var(--accent)}
             <button class="chip" data-c="sedae" aria-pressed="false">세대원 전원 이전</button>
             <button class="chip" data-c="sangsok" aria-pressed="false">상속</button>
             <button class="chip" data-c="haewoe" aria-pressed="false">해외이주</button>
-            <button class="chip" data-c="bulgapi" aria-pressed="false">경매·공매 등</button>
+            <button class="chip" data-c="bulgapi" aria-pressed="false">경매·공매(국가·금융기관 채무)</button>
+            <button class="chip" data-c="sangsokchwideuk" aria-pressed="false">상속·이혼으로 취득</button>
+            <button class="chip" data-c="jijeongjeon" aria-pressed="false">지정 전 계약+60일내 신고</button>
           </div>
           <div class="hint" style="font-size:11px;color:var(--ink-3)">구두 주장만으론 확정 불가 → 증빙 요청으로 처리 (근거등급 T)</div>
         </fieldset>
@@ -418,6 +422,14 @@ var GATE=null;   /* 정보몽땅 진행단계에서 온 §39② 발동 여부 {g
 
 /* ---------- C. 자격 (조합원 지위 승계) ---------- */
 function evalSucc(){
+  var claims0={};
+  document.querySelectorAll("#claims .chip").forEach(function(c){
+    claims0[c.dataset.c]=c.getAttribute("aria-pressed")==="true"});
+  if(claims0.sangsokchwideuk)
+    /* §39② 본문 괄호: '양수' 에서 상속·이혼으로 인한 양도·양수는 제외 → 제한 자체가 없음 */
+    return {overall:"가능",exs:[{name:"상속·이혼으로 취득 — '양수' 아님",
+      law:"도시정비법 §39② 본문",verdict:"MET",val:"지위 양도 제한 대상 아님",
+      ev:"매매로 산 게 아니라면 예외를 따질 이유가 없습니다"}],ask:[]};
   if(GATE && GATE.gate==="미발동")
     return {overall:"가능",exs:[{name:"§39② 시점 요건 미도래",law:"도시정비법 §39② 본문",
       verdict:"MET",val:"현재 "+GATE.stage,ev:GATE.why}],ask:[]};
@@ -429,13 +441,16 @@ function evalSucc(){
     return {overall:"가능",exs:[{name:"투기과열지구 아님",law:"제한 없음",verdict:"MET",val:"지위 양도 자유",ev:""}],ask:[]};
   var type=$("type").value;
   var own=num("own"), reside=num("reside"), myeong=num("myeong");
+  var onehouse=$("onehouse")?$("onehouse").checked:true;
   var johap=num("johap"), saeop=num("saeop"), chak=num("chak");
   var claims={sedae:0,sangsok:0,haewoe:0,bulgapi:0};
   document.querySelectorAll("#claims .chip").forEach(function(c){claims[c.dataset.c]=c.getAttribute("aria-pressed")==="true"});
   var E=[],ask=[];
 
-  // ex1 장기보유
+  // ex1 장기보유 — §39②4호는 '1세대 1주택자로서' 가 요건이다
   var e1=[];
+  e1.push(onehouse?{v:"MET",t:"1세대 1주택자",val:"1주택"}
+                  :{v:"NOT_MET",t:"1세대 1주택자",val:"다주택 → 4호 해당 없음"});
   if(own===null) e1.push({v:"INSUFFICIENT",t:"소유 10년",m:"매도인 등기부(취득일)"});
   else if(myeong!==null&&myeong!==own) e1.push({v:"CONFLICT",t:"소유기간",m:"등기부 취득("+own+") ≠ 조합명부("+myeong+") — 전문가 확인",val:"충돌"});
   else e1.push({v:(BASE-own>=10)?"MET":"NOT_MET",t:"소유 10년",val:"취득 "+own+" → "+(BASE-own)+"년"});

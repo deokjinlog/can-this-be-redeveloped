@@ -62,7 +62,7 @@ def c4():
     return "빈 단계·지역주택 표기 → 확인필요"
 
 
-@case("⑤engine: 제한 미발동이면 8예외를 따지지 않는다")
+@case("⑤engine: 제한 미발동이면 예외를 따지지 않는다")
 def c5():
     base = dict(사업유형="재개발", 기준일=date(2026, 9, 1), 기준일_기준="등기일",
                 투기과열지구=True)
@@ -71,18 +71,18 @@ def c5():
         False, Grade.S1, "정보몽땅", "현재 '정비구역지정'")))
     assert "가능" in 미발동.overall, 미발동.overall
     assert len(미발동.exceptions) == 1 and 미발동.exceptions[0].id == "gate39"
-    assert len(없음.exceptions) == 8, len(없음.exceptions)
-    return f"게이트 없음 → 8예외 판정 / 미발동 → 즉시 '{미발동.overall}'"
+    assert len(없음.exceptions) >= 13, len(없음.exceptions)
+    return f"게이트 없음 → {len(없음.exceptions)}예외 판정 / 미발동 → 즉시 '{미발동.overall}'"
 
 
-@case("⑥engine: 제한 발동이면 기존 8예외 경로 그대로")
+@case("⑥engine: 제한 발동이면 예외 경로 그대로")
 def c6():
     rep = evaluate(Case(사업유형="재건축", 기준일=date(2026, 9, 1), 기준일_기준="등기일",
                         투기과열지구=True,
                         제한발동=Fact(True, Grade.S1, "정보몽땅", "현재 '조합설립인가'")))
-    assert len(rep.exceptions) == 8, len(rep.exceptions)
+    assert len(rep.exceptions) >= 13, len(rep.exceptions)
     assert any("제한 발동" in n for n in rep.notes), rep.notes
-    return f"8예외 유지 · {rep.overall}"
+    return f"{len(rep.exceptions)}예외 유지 · {rep.overall}"
 
 
 @case("⑦구역↔사업장 매칭 — 번호가 어긋나면 붙이지 않는다")

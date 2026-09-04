@@ -235,7 +235,7 @@ def run(keyword: str, mock: bool = False, unit: str = "road",
     print("■ C 게이트 — 입주권 자격 (조합원 지위 승계)")
     if site is None:
         print("  진행단계를 특정하지 못해 §39② 발동 여부를 판정할 수 없습니다.")
-        print("  투기과열지구라면 8예외 중 하나가 필요하고, 그건 개인 서류가 있어야 합니다.")
+        print("  투기과열지구라면 13예외 중 하나가 필요하고, 그건 개인 서류가 있어야 합니다.")
     else:
         st, why = site.승계제한
         icon = {"발동": "🔒", "미발동": "🔓", "해당없음": "⚪", "확인필요": "🟡"}[st]
@@ -243,7 +243,7 @@ def run(keyword: str, mock: bool = False, unit: str = "road",
         print(f"     {why}")
         if st == "미발동":
             print()
-            print("  → 지금 시점에서는 **서류 없이도 승계 가능**합니다(8예외 불필요).")
+            print("  → 지금 시점에서는 **서류 없이도 승계 가능**합니다(13예외 불필요).")
             print("     ⚠ 다만 계약~잔금 사이에 인가가 나면 결론이 뒤집힙니다. "
                   "잔금일 기준으로 단계를 다시 확인하세요.")
         elif st == "해당없음":
@@ -256,7 +256,7 @@ def run(keyword: str, mock: bool = False, unit: str = "road",
         import elapse as EL
         kw = dict(사업유형="재건축" if site.law == "재건축" else "재개발",
                   기준일=계약일 or 등기일, 기준일_기준="미정", 투기과열지구=True)
-        kw.update(EL.to_case_facts(el))
+        kw.update(EL.to_case_facts(el, site))
         if 계약일 and 등기일:
             dual = EN.evaluate_dual(EN.Case(**kw), 계약일, 등기일)
             out["dual"] = dual
@@ -277,11 +277,11 @@ def run(keyword: str, mock: bool = False, unit: str = "road",
                   제한발동=EN.Fact(True, EN.Grade.S1, "정보몽땅 사업장목록",
                                 f"현재 '{site.stage}'"))
         if el is not None:
-            kw.update(EL.to_case_facts(el))
+            kw.update(EL.to_case_facts(el, site))
         rep = EN.evaluate(EN.Case(**kw))
         out["succ"] = rep
         print()
-        print(f"  가진 자료만으로 8예외를 돌린 결과: {rep.overall}")
+        print(f"  가진 자료만으로 13예외를 돌린 결과: {rep.overall}")
         icon = {"MET": "🟢", "NOT_MET": "🔴", "INSUFFICIENT": "🟡",
                 "CONFLICT": "🟠", "NA": "⚪"}
         for ex in rep.exceptions:
@@ -306,7 +306,7 @@ def run(keyword: str, mock: bool = False, unit: str = "road",
         print("    📄 (해당 시) 상속·해외이주·경매 증빙")
     elif site is None or site.승계제한[0] == "확인필요":
         print()
-        print("  8예외 판정에 필요한 서류 (공공데이터에 없음 — 업로드가 유일한 경로):")
+        print("  13예외 판정에 필요한 서류 (공공데이터에 없음 — 업로드가 유일한 경로):")
         print("    📄 등기부등본 (매도인 취득일)")
         print("    📄 주민등록초본 (매도인 거주기간, 배우자·직계존비속 합산)")
         print("    📄 (해당 시) 상속·해외이주·경매 증빙")

@@ -169,10 +169,25 @@ def collect(cafes: list, delay: float = 0.8, path: str = OUT) -> dict:
 
 # ── engine 연결 ──
 
-def to_case_facts(e: Elapse) -> dict:
+# Case 필드 → 그 사건이 일어났다고 볼 수 있는 최소 진행단계 순위(stage.ORDER 기준)
+_NEEDS_RANK = {
+    "조합설립인가일": 60,
+    "사업시행계획인가일": 70,
+    "관리처분인가일": 80,
+    "착공일": 90,
+    "준공": 100,
+}
+
+
+def to_case_facts(e: Elapse, site=None) -> dict:
     """추진경과 → engine.Case 에 넣을 Fact 들 (S1).
 
     engine.Case.준공 은 날짜가 아니라 bool(준공했는가) 이라 따로 변환한다.
+
+    site(stage.Site)를 주면 **아직 오지 않은 단계**를 Fact(None) 으로 채운다.
+    '미확인' 과 '확정적으로 아직 없음' 은 다르다 — 전자는 자료를 물어야 하지만
+    후자는 이미 답이다(착공 전인 구역에 착공일을 물을 이유가 없다).
+    단계는 기관 게시치(S1)라 시차가 있을 수 있어, 근거 문구에 현재 단계를 남긴다.
     """
     from datetime import date as D
     from engine import Fact, Grade
@@ -184,6 +199,14 @@ def to_case_facts(e: Elapse) -> dict:
             out["준공"] = Fact(True, Grade.S1, SRC_DOC, span)
         else:
             out[fld] = Fact(D(y, m, d), Grade.S1, SRC_DOC, span)
+
+    if site is not None and getattr(site, "rank", -1) >= 0:
+        for fld, need in _NEEDS_RANK.items():
+            if fld in out:
+                continue
+            if site.rank < need:
+                out[fld] = Fact(None, Grade.S1, "정보몽땅 진행단계",
+                                f"현재 '{site.stage}' — 해당 단계 미도래")
     return out
 
 

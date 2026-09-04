@@ -59,6 +59,19 @@ def _min_grade(grades: list[Grade]) -> Grade:
 STALE_DAYS = 30  # 등기부·초본 발급이 기준일보다 이만큼 전이면 stale 경고
 
 
+def _cite(which: str, num: str, 항: int = None, 호: int = None) -> str:
+    """조문 라벨 + 원문 일부. 원문 파일이 없으면 라벨만(동작은 유지)."""
+    try:
+        import law
+        lab = law.label(which, num, 항, 호)
+        txt = law.cite(which, num, 항, 호)
+        return f"{lab} — {txt[:110]}" if txt else lab
+    except SystemExit:
+        return ""
+    except Exception:
+        return ""
+
+
 # ───────────────────────── 입력 ─────────────────────────
 
 @dataclass
@@ -78,7 +91,7 @@ class Case:
     기준일: date                         # 양수일 (판정 시점)
     기준일_기준: str = "미정"            # "계약일" | "등기일" | "미정"
     투기과열지구: Optional[bool] = None  # None=미확인
-    # §39② 본문의 시점 요건 — 이 단계 '전' 이면 제한 자체가 없다(8예외를 따질 필요 없음).
+    # §39② 본문의 시점 요건 — 이 단계 '전' 이면 제한 자체가 없다(13예외를 따질 필요 없음).
     #   재건축: 조합설립인가 후 / 재개발: 관리처분계획인가 후
     # value 는 (도달여부 bool, 현재단계 표시문자열). None = 미확인 → 지금까지처럼 제한 가정.
     제한발동: Optional[Fact] = None
@@ -96,7 +109,19 @@ class Case:
     claim_세대이전: Optional[Fact] = None
     claim_상속: Optional[Fact] = None
     claim_해외이주: Optional[Fact] = None
-    claim_불가피: Optional[Fact] = None   # 경매·공매 등 시행령 §37③
+    claim_불가피: Optional[Fact] = None   # 경매·공매 등 시행령 §37③5호
+    # §39② 본문 괄호: '양수' 에서 상속·이혼으로 인한 양도·양수는 **제외**된다.
+    # 즉 상속·이혼으로 취득했으면 제한 자체가 걸리지 않는다(예외를 따질 필요도 없다).
+    취득사유_상속이혼: Optional[Fact] = None
+    # §39②4호는 '1세대 1주택자' 요건이 붙는다. None=미확인
+    일세대일주택: Optional[Fact] = None
+    # §37③6호: 투기과열지구 지정 전 계약 + 지정일부터 60일 내 부동산거래신고
+    claim_지정전계약: Optional[Fact] = None
+    # §37③7호: 지정 전 토지거래허가 신청 → 지정 후 계약
+    claim_토지거래허가: Optional[Fact] = None
+    # §39②5호 지분형주택 / 6호 공공재개발 시행자에게 양도
+    claim_지분형주택: Optional[Fact] = None
+    claim_공공재개발양도: Optional[Fact] = None
 
 
 # ───────────────────────── 판정 단위 ─────────────────────────
@@ -172,7 +197,7 @@ def _combine_and(reqs: list[Req]) -> tuple[V, Grade]:
     return v, grade
 
 
-# ───────────────────────── 예외 빌더 (8개) ─────────────────────────
+# ───────────────────────── 예외 빌더 (13개) ─────────────────────────
 
 def _ex1_장기보유(c: Case) -> ExResult:
     소유 = _req_duration("소유 10년 이상", c.취득일, c.기준일, 10,
@@ -186,19 +211,34 @@ def _ex1_장기보유(c: Case) -> ExResult:
                   missing_input="등기부·조합명부 불일치 — 전문가 확인 필요")
     거주 = _req_duration("거주 5년 이상(합산)", c.거주개시일, c.기준일, 5,
                         "매도인 주민등록초본(주소 변동 포함)")
-    verdict, grade = _combine_and([소유, 거주])
+    # §39②4호 본문: "1세대 1주택자로서" — 기간만 채운다고 되는 게 아니다
+    if c.일세대일주택 is None:
+        일주택 = Req("1세대 1주택자", V.INSUFFICIENT, grade=Grade.U,
+                  missing_input="매도인 세대 전원의 주택 보유 확인(등기부·세대별 주민등록표)")
+    else:
+        일주택 = Req("1세대 1주택자",
+                  V.MET if c.일세대일주택.value else V.NOT_MET,
+                  value="1세대 1주택" if c.일세대일주택.value else "다주택 → 4호 해당 없음",
+                  source_doc=c.일세대일주택.source_doc,
+                  source_span=c.일세대일주택.source_span, grade=c.일세대일주택.grade)
+    reqs = [일주택, 소유, 거주]
+    verdict, grade = _combine_and(reqs)
     return ExResult("ex1_장기보유", "1세대1주택 장기보유(10년 소유·5년 거주)",
-                    "도시정비법 §39②4호 · 시행령 §37①", "공통", True,
-                    verdict, grade, [소유, 거주])
+                    _cite("법", "39", 2, 4) or "도시정비법 §39②4호 · 시행령 §37①",
+                    "공통", True, verdict, grade, reqs)
 
 
-def _ex_재건축_기간(c: Case, exid, label, law, anchor_fact, anchor_name,
-                  후속_fact, 후속_없음이_충족: bool, 후속_doc):
-    """재건축 전용 3종(사업시행인가 미신청/미착공/미준공)의 공통 뼈대.
-    anchor+3년 경과 & 후속행위 없음 & 소유 3년 이상 → 충족."""
-    if c.사업유형 != "재건축":
-        na = Req(label, V.NA, grade=Grade.U)
-        return ExResult(exid, label, law, "재건축", True, V.NA, Grade.U, [na])
+def _ex_지연(c: Case, exid, label, law, anchor_fact, anchor_name,
+            후속_fact, 후속_doc, 적용: str = "재건축", 대상: str = "건축물"):
+    """시행령 §37③1~3호(사업시행인가 미신청 / 미착공 / 미준공)의 공통 뼈대.
+
+    anchor + 3년 경과 & 후속행위 없음 & 소유 3년 이상 → 충족.
+    적용: "재건축"(1·2호) | "공통"(3호 — 재개발도 해당)
+    대상: 조문이 한정하는 물건("건축물" / "토지 또는 건축물" / "토지")
+    """
+    if 적용 == "재건축" and c.사업유형 != "재건축":
+        na = Req(label, V.NA, value="재개발에는 적용되지 않는 호", grade=Grade.U)
+        return ExResult(exid, label, law, 적용, True, V.NA, Grade.U, [na])
 
     reqs = []
     # 요건 A: anchor 로부터 3년 경과했는데 후속행위 없음
@@ -239,8 +279,12 @@ def _ex_재건축_기간(c: Case, exid, label, law, anchor_fact, anchor_name,
     # 요건 B: 소유 3년 이상
     reqs.append(_req_duration("소유 3년 이상", c.취득일, c.기준일, 3,
                              "매도인 등기부등본(갑구 소유권 접수일)"))
+    if 대상 == "토지":
+        reqs.append(Req("대상이 '토지'", V.INSUFFICIENT, grade=Grade.U,
+                        value="이 호는 토지에만 적용(건축물 제외)",
+                        missing_input="양도 대상이 토지인지 확인(등기부 표제부)"))
     verdict, grade = _combine_and(reqs)
-    return ExResult(exid, label, law, "재건축", True, verdict, grade, reqs)
+    return ExResult(exid, label, law, 적용, True, verdict, grade, reqs)
 
 
 def _ex_특수정황(exid, label, law, claim: Optional[Fact], proof_doc) -> ExResult:
@@ -260,11 +304,15 @@ def _ex_특수정황(exid, label, law, claim: Optional[Fact], proof_doc) -> ExRe
 
 
 # 예외 8 (시행령 §37③ 불가피 사유)은 조문 각 호가 아직 원문 미검증 → verified=False
-def _ex8_불가피(c: Case) -> ExResult:
-    res = _ex_특수정황("ex8_불가피", "불가피한 사유(경매·공매 등)",
-                     "시행령 §37③ 각 호 (원문 미검증)", c.claim_불가피,
-                     "해당 사유 증빙(경매개시결정·판결문 등)")
-    res.verified = False  # 각 호 열거 law.go.kr 확인 전까지
+def _ex9_경매공매(c: Case) -> ExResult:
+    """§37③5호 — 경매·공매면 다 되는 게 아니다.
+
+    조문은 '국가·지방자치단체 및 금융기관에 대한 채무를 이행하지 못하여' 로 한정한다.
+    사인(私人) 간 채무로 인한 경매는 이 호에 해당하지 않는다.
+    """
+    res = _ex_특수정황("ex9_경매공매", "국가·지자체·금융기관 채무 불이행에 따른 경매·공매",
+                     _cite("령", "37", 3, 5), c.claim_불가피,
+                     "경매개시결정·채권자 확인(국가·지자체·금융기관인지)")
     return res
 
 
@@ -391,7 +439,7 @@ def render_dual(d: DualReport) -> str:
 
 def evaluate(c: Case) -> Report:
     notes = []
-    # 기준일 설계-U: 양수 시점(계약일 vs 등기일)이 8예외 전부의 계산 기준
+    # 기준일 설계-U: 양수 시점(계약일 vs 등기일)이 13예외 전부의 계산 기준
     if c.기준일_기준 == "미정":
         notes.append("⚠️ 기준일(양수 시점)이 계약일인지 등기일인지 미확정. "
                      "이 날짜 하나가 모든 예외의 기간계산 기준이다 — 계약일·등기일을 알면 "
@@ -405,8 +453,27 @@ def evaluate(c: Case) -> Report:
     if c.투기과열지구 is None:
         notes.append("투기과열지구 지정 여부 미확인(정보몽땅/지정고시). 지정 가정하고 판정함.")
 
+    # §39② 본문 괄호 — '양수' 에서 상속·이혼으로 인한 양도·양수는 제외된다.
+    # 예외를 따질 필요 없이 제한 자체가 걸리지 않는다.
+    if c.취득사유_상속이혼 is not None and c.취득사유_상속이혼.value:
+        req = Req("상속·이혼으로 인한 취득", V.MET,
+                  value="§39② 의 '양수' 에서 제외 — 지위 양도 제한 대상이 아님",
+                  source_doc=c.취득사유_상속이혼.source_doc,
+                  source_span=c.취득사유_상속이혼.source_span,
+                  grade=c.취득사유_상속이혼.grade)
+        return Report(c, [ExResult("gate_상속이혼", "상속·이혼 취득 — '양수' 아님",
+                                   _cite("법", "39", 2), "공통", True, V.MET,
+                                   c.취득사유_상속이혼.grade, [req])],
+                      _OVERALL["가능"],
+                      notes=notes + [
+                          "§39② 본문은 '양수' 에서 상속·이혼으로 인한 양도·양수를 명시적으로 "
+                          "제외한다. 매매로 산 게 아니라 상속·이혼으로 취득했다면 13예외를 "
+                          "따질 이유가 없다.",
+                          "⚠ 다만 '상속으로 취득한 주택으로 세대원 모두 이전'(§39②2호)은 "
+                          "양도인 쪽 예외로, 이것과 다른 상황이다."])
+
     # §39② 시점 게이트 — 재건축은 조합설립인가 후, 재개발은 관리처분계획인가 후부터 제한.
-    # 그 전이면 제한이 아예 없으므로 8예외를 따지지 않는다(따지면 과잉 판정).
+    # 그 전이면 제한이 아예 없으므로 13예외를 따지지 않는다(따지면 과잉 판정).
     if c.제한발동 is not None and c.제한발동.value is False:
         gate = "조합설립인가" if c.사업유형 == "재건축" else "관리처분계획인가"
         req = Req(f"§39② 시점 요건({c.사업유형}: {gate} 후)", V.NOT_MET,
@@ -419,12 +486,12 @@ def evaluate(c: Case) -> Report:
                       _OVERALL["가능"],
                       notes=notes + [
                           f"{c.사업유형} 은 {gate} **후** 양수부터 조합원 지위 승계가 제한된다"
-                          f"(§39② 본문). 현재는 그 전이라 8예외를 따질 필요가 없다.",
+                          f"(§39② 본문). 현재는 그 전이라 13예외를 따질 필요가 없다.",
                           "⚠ 단계는 기관 게시치(S1)다. 양수 시점까지 단계가 넘어가면 결론이 바뀐다 "
                           "— 계약~잔금 사이 인가가 나는 경우가 실제로 문제된다.",
                       ])
     if c.제한발동 is not None and c.제한발동.value is True:
-        notes.append(f"§39② 제한 발동 상태({c.제한발동.source_span}) → 아래 8예외 중 하나가 필요.")
+        notes.append(f"§39② 제한 발동 상태({c.제한발동.source_span}) → 아래 13예외 중 하나가 필요.")
 
     exceptions = [
         _ex1_장기보유(c),
@@ -437,16 +504,34 @@ def evaluate(c: Case) -> Report:
         _ex_특수정황("ex4_해외이주", "세대원 전원 해외이주/2년+ 체류",
                    "도시정비법 §39②3호", c.claim_해외이주,
                    "해외이주신고확인서·출입국 사실증명"),
-        _ex_재건축_기간(c, "ex5_사업시행인가지연", "재건축: 조합설립+3년 내 사업시행인가 미신청",
-                     "시행령 §37②", c.조합설립인가일, "조합설립인가",
-                     c.사업시행계획인가일, True, "정보몽땅 사업시행계획인가 신청 이력"),
-        _ex_재건축_기간(c, "ex6_착공지연", "재건축: 사업시행인가+3년 내 미착공",
-                     "시행령 §37②", c.사업시행계획인가일, "사업시행계획인가",
-                     c.착공일, True, "정보몽땅 착공 이력"),
-        _ex_재건축_기간(c, "ex7_준공지연", "재건축: 착공+3년 내 미준공",
-                     "시행령 §37②", c.착공일, "착공",
-                     c.준공, True, "정보몽땅 준공 이력"),
-        _ex8_불가피(c),
+        _ex_지연(c, "ex5_사업시행인가지연", "재건축: 조합설립+3년 내 사업시행인가 미신청",
+                _cite("령", "37", 3, 1), c.조합설립인가일, "조합설립인가",
+                c.사업시행계획인가일, "정보몽땅 사업시행계획인가 신청 이력",
+                적용="재건축", 대상="건축물"),
+        _ex_지연(c, "ex6_착공지연", "재건축: 사업시행인가+3년 내 미착공",
+                _cite("령", "37", 3, 2), c.사업시행계획인가일, "사업시행계획인가",
+                c.착공일, "정보몽땅 착공 이력",
+                적용="재건축", 대상="토지 또는 건축물"),
+        # 3호는 재개발·재건축 **둘 다**, 단 '토지' 에 한정된다 (그동안 재건축 전용으로 잘못 처리)
+        _ex_지연(c, "ex7_준공지연", "착공+3년 내 미준공 (재개발·재건축 공통, 토지)",
+                _cite("령", "37", 3, 3), c.착공일, "착공",
+                c.준공, "정보몽땅 준공 이력", 적용="공통", 대상="토지"),
+        _ex_특수정황("ex8_부칙상속이혼", "부칙 토지등소유자로부터 상속·이혼 취득",
+                   _cite("령", "37", 3, 4), None,
+                   "가족관계증명·이혼 관련 서류"),
+        _ex9_경매공매(c),
+        _ex_특수정황("ex10_지정전계약", "투기과열지구 지정 전 계약 + 60일 내 거래신고",
+                   _cite("령", "37", 3, 6), c.claim_지정전계약,
+                   "계약서(계약금 지급내역)·부동산거래신고필증"),
+        _ex_특수정황("ex11_토지거래허가", "지정 전 토지거래허가 신청 → 지정 후 계약",
+                   _cite("령", "37", 3, 7), c.claim_토지거래허가,
+                   "토지거래허가 신청서·허가서·계약서"),
+        _ex_특수정황("ex12_지분형주택", "지분형주택 공급 위해 토지주택공사등과 공유",
+                   _cite("법", "39", 2, 5), c.claim_지분형주택,
+                   "지분형주택 공급 관련 서류"),
+        _ex_특수정황("ex13_공공재개발양도", "공공재개발사업 시행자에게 양도",
+                   _cite("법", "39", 2, 6), c.claim_공공재개발양도,
+                   "공공재개발 시행자와의 양도 계약"),
     ]
 
     # OR 종합 — 하나라도 MET 이면 가능(short-circuit), 절대 확인필요를 불가로 반올림 금지
