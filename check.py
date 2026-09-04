@@ -54,7 +54,18 @@ def _building_from_raw(raw: dict):
     return b, info
 
 
-def run(keyword: str, mock: bool = False, unit: str = "road"):
+def _parse_date(s: str):
+    from datetime import datetime
+    for f in ("%Y-%m-%d", "%Y.%m.%d", "%Y%m%d"):
+        try:
+            return datetime.strptime(s.strip(), f).date()
+        except ValueError:
+            pass
+    raise SystemExit(f"날짜 형식을 못 읽음: {s} (예: 2026-05-01)")
+
+
+def run(keyword: str, mock: bool = False, unit: str = "road",
+        계약일=None, 등기일=None):
     import juso
 
     out = {"keyword": keyword}
@@ -239,6 +250,24 @@ def run(keyword: str, mock: bool = False, unit: str = "road"):
             print()
             print("  → 도시정비법 §39② 사업이 아니라 이 엔진의 스코프 밖입니다. "
                   "해당 특례법의 양도 제한을 따로 확인하세요.")
+    # 양수 시점이 갈리는지 — 계약일·등기일을 알면 둘 다 돌린다
+    if site is not None and (계약일 or 등기일) and el is not None:
+        import engine as EN
+        import elapse as EL
+        kw = dict(사업유형="재건축" if site.law == "재건축" else "재개발",
+                  기준일=계약일 or 등기일, 기준일_기준="미정", 투기과열지구=True)
+        kw.update(EL.to_case_facts(el))
+        if 계약일 and 등기일:
+            dual = EN.evaluate_dual(EN.Case(**kw), 계약일, 등기일)
+            out["dual"] = dual
+            print()
+            print(EN.render_dual(dual))
+            print()
+        else:
+            g = EN.gate_at(EN.Case(**kw), 계약일 or 등기일)
+            if g is not None:
+                print(f"\n  · 양수 {계약일 or 등기일} 시점: {g.source_span}\n")
+
     if site is not None and site.승계제한[0] == "발동":
         # 인가 일자가 있으면 재건축 3년 트리(예외5~7)는 서류 없이도 돌아간다.
         import engine as EN
@@ -294,11 +323,17 @@ def main(argv=None):
     p.add_argument("keyword", nargs="*")
     p.add_argument("--mock", action="store_true", help="키 없이 흐름 확인")
     p.add_argument("--by", choices=["road", "bun"], default="road", help="노후도 집계 단위")
+    p.add_argument("--계약", "--contract", dest="계약", metavar="YYYY-MM-DD",
+                   help="계약일 — 등기일과 함께 주면 두 시점을 각각 판정")
+    p.add_argument("--등기", "--register", dest="등기", metavar="YYYY-MM-DD",
+                   help="등기(잔금)일")
     a = p.parse_args(argv)
     kw = " ".join(a.keyword).strip()
     if not kw:
         p.error('주소를 입력하세요. 예: python check.py "서울 관악구 신림동 10-10"')
-    run(kw, a.mock, a.by)
+    run(kw, a.mock, a.by,
+        _parse_date(a.계약) if a.계약 else None,
+        _parse_date(a.등기) if a.등기 else None)
 
 
 if __name__ == "__main__":

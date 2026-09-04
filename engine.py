@@ -87,6 +87,7 @@ class Case:
     거주개시일: Optional[Fact] = None    # 초본상 실거주 개시일 (합산 반영, date)
     조합설립인가일: Optional[Fact] = None
     사업시행계획인가일: Optional[Fact] = None   # value=None → 확정 미신청
+    관리처분인가일: Optional[Fact] = None       # 재개발 §39② 발동 시점
     착공일: Optional[Fact] = None                # value=None → 확정 미착공
     준공: Optional[Fact] = None                  # value=bool
     조합명부_등재일: Optional[Fact] = None       # CONFLICT 교차검증용
@@ -300,13 +301,102 @@ class Report:
         return logs
 
 
+@dataclass
+class DualReport:
+    """양수 시점(계약일 vs 등기일) 두 시나리오를 나란히 돌린 결과.
+
+    §39② 의 '양수' 가 계약 시점인지 등기 시점인지는 조문만으로 확정되지 않는다
+    (시행령 §37③6 이 '지정 전 계약체결' 을 별도 예외로 두는 걸 보면 원칙은 등기로 읽히나
+    유권해석이 필요하다). 그래서 **하나를 고르지 않고 둘 다 돌려**, 결론이 갈리는지를 본다.
+    갈리면 그 자체가 답이다 — "이 날짜 하나로 결과가 바뀝니다" 가 사용자가 알아야 할 사실.
+    """
+    계약: Report
+    등기: Report
+
+    @property
+    def 갈림(self) -> bool:
+        return self.계약.overall != self.등기.overall
+
+    @property
+    def overall(self) -> str:
+        if not self.갈림:
+            return self.계약.overall
+        return "기준일에 따라 갈림"
+
+    @property
+    def 요청서류(self) -> list[str]:
+        docs = list(self.계약.요청서류)
+        for d in self.등기.요청서류:
+            if d not in docs:
+                docs.append(d)
+        return docs
+
+
+def gate_at(c: Case, 기준일: date) -> Optional[Fact]:
+    """그 시점에 §39② 제한이 이미 발동해 있었는지 — 인가 '일자'로 계산.
+
+    재건축은 조합설립인가, 재개발은 관리처분계획인가가 기준이다.
+    인가일을 모르면 None(=판단 보류, 호출자가 준 제한발동을 그대로 쓴다).
+    이게 dual-run 의 핵심이다: 계약 시점엔 미발동인데 잔금·등기 시점엔 발동해 있는
+    경우가 실무에서 실제로 문제된다.
+    """
+    f = c.조합설립인가일 if c.사업유형 == "재건축" else c.관리처분인가일
+    if f is None or f.value is None:
+        return None
+    gate = "조합설립인가" if c.사업유형 == "재건축" else "관리처분계획인가"
+    발동 = f.value <= 기준일
+    return Fact(발동, f.grade, f.source_doc,
+                f"{gate} {f.value} · 양수 {기준일} → "
+                + ("인가 후 양수(제한 발동)" if 발동 else "인가 전 양수(제한 없음)"))
+
+
+def evaluate_dual(c: Case, 계약일: date, 등기일: date) -> DualReport:
+    """같은 사안을 계약일 기준·등기일 기준으로 각각 판정.
+
+    기준일이 바뀌면 기간계산뿐 아니라 **§39② 발동 여부 자체**가 달라질 수 있어,
+    인가 일자를 아는 경우 시점마다 게이트를 다시 계산한다.
+    """
+    import dataclasses
+    out = []
+    for 기준일, 라벨 in ((계약일, "계약일"), (등기일, "등기일")):
+        g = gate_at(c, 기준일)
+        kw = {"기준일": 기준일, "기준일_기준": 라벨}
+        if g is not None:
+            kw["제한발동"] = g
+        out.append(evaluate(dataclasses.replace(c, **kw)))
+    return DualReport(*out)
+
+
+def render_dual(d: DualReport) -> str:
+    L = ["■ 양수 시점 두 갈래 (계약일 vs 등기일)", ""]
+    for nm, rep in (("계약일", d.계약), ("등기일", d.등기)):
+        L.append(f"  {nm} {rep.case.기준일} 기준 → {rep.overall}")
+    L.append("")
+    if d.갈림:
+        L += ["  ⚠️ **결론이 갈립니다.** '양수' 시점이 계약일인지 등기일인지에 따라",
+              "     조합원 지위 승계 여부가 달라집니다. 이 사안은 전문가 확인이 필요합니다",
+              "     (시행령 §37③6 의 '지정 전 계약체결' 예외 취지상 원칙은 등기로 읽히나,",
+              "      유권해석·판례 확인 없이 한쪽으로 단정하지 않습니다).", ""]
+        for nm, rep in (("계약일", d.계약), ("등기일", d.등기)):
+            g = rep.case.제한발동
+            if g is not None:
+                L.append(f"  · {nm}: {g.source_span}")
+            met = [e.label for e in rep.exceptions if e.verdict == V.MET]
+            L.append(f"    충족 예외: {', '.join(met) if met else '없음'}")
+    else:
+        L.append(f"  ✓ 두 기준 모두 같은 결론({d.계약.overall}) — 이 사안에서는 시점 논란이 결과를")
+        L.append("     바꾸지 않습니다.")
+    return "\n".join(L)
+
+
 def evaluate(c: Case) -> Report:
     notes = []
     # 기준일 설계-U: 양수 시점(계약일 vs 등기일)이 8예외 전부의 계산 기준
     if c.기준일_기준 == "미정":
         notes.append("⚠️ 기준일(양수 시점)이 계약일인지 등기일인지 미확정. "
-                     "이 날짜 하나가 모든 예외의 기간계산 기준이라, 계약일/등기일 두 "
-                     "시나리오를 각각 돌려 결과가 갈리는지 확인할 것(시행령 §37③6 유권해석 필요).")
+                     "이 날짜 하나가 모든 예외의 기간계산 기준이다 — 계약일·등기일을 알면 "
+                     "evaluate_dual() 로 두 시나리오를 돌려 결과가 갈리는지 보라"
+                     "(시행령 §37③6 유권해석 필요).")
 
     # 투기과열지구 게이트 — 지정 아니면 양도 자유
     if c.투기과열지구 is False:

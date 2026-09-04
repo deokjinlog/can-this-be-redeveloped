@@ -131,6 +131,11 @@ fieldset{border:none;margin:0;padding:0}
 .zbanner b{color:var(--go)}
 .zbanner .meta{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);margin-top:3px}
 .zbanner .warn{color:var(--hold);font-size:11px;margin-top:4px}
+.dual{margin:2px 0 10px;padding:9px 11px;border-radius:6px;font-size:11.5px;line-height:1.55;border:1px solid}
+.dual.split{background:var(--no-bg);border-color:var(--no-line)}
+.dual.same{background:var(--inset);border-color:var(--line-2);color:var(--ink-2)}
+.dual b{color:var(--no)}
+.dual .ln{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);margin-top:3px}
 .gate{margin-top:7px;padding:9px 11px;border-radius:6px;font-size:12px;line-height:1.55;border:1px solid}
 .gate.free{background:var(--go-bg);border-color:var(--go-line)}
 .gate.lock{background:var(--no-bg);border-color:var(--no-line)}
@@ -272,6 +277,12 @@ a{color:var(--accent)}
 
         <fieldset>
           <div class="leg">② 매수인 (입주권 자격 · 매도인 기준)</div>
+          <div class="row">
+            <div class="f"><label>내 계약일 <span class="hint">(양수 시점 논란)</span></label>
+              <input id="gyeyak" type="date"></div>
+            <div class="f"><label>내 등기(잔금)일</label><input id="deunggi" type="date"></div>
+          </div>
+          <div id="dualBox"></div>
           <div class="row">
             <div class="f"><label>매도인 취득연도</label><input id="own" type="number" placeholder="미확인" value="2011"></div>
             <div class="f"><label>매도인 거주 시작연도</label><input id="reside" type="number" placeholder="미확인" value="2013"><span class="hint">배우자·직계존비속 합산 반영</span></div>
@@ -524,7 +535,8 @@ var PRE={
   hold:{type:"재개발",promo:0,toohee:1,area:15000,nohu:70,gwaso:"",jeopdo:"",hosu:"",nohuA:"",built:1990,struct:"RC공동주택",own:2011,reside:"",myeong:"",johap:"",saeop:"",chak:"",claims:[]}
 };
 function applyPreset(p){var d=PRE[p];if(!d)return;
-  ZONE=null; GATE=null; PROXY=false; $("ad-zone").innerHTML="";
+  ZONE=null; GATE=null; PROXY=false; ANCHORS=null;
+  $("ad-zone").innerHTML=""; if($("dualBox")) $("dualBox").innerHTML="";
   ["type","struct"].forEach(function(k){$(k).value=d[k]});
   ["promo","toohee"].forEach(function(k){$(k).checked=!!d[k]});
   ["area","nohu","gwaso","jeopdo","hosu","nohuA","built","own","reside","myeong","johap","saeop","chak"].forEach(function(k){$(k).value=d[k]});
@@ -538,6 +550,7 @@ document.querySelectorAll("input,select").forEach(function(el){el.addEventListen
   if(["area","nohu","nohuA","type","promo"].indexOf(el.id)>=0){ZONE=null;}
   if(["type","johap","saeop","chak","toohee"].indexOf(el.id)>=0){GATE=null;}
   if(el.id==="nohu"||el.id==="nohuA"){PROXY=false;}
+  if(el.id==="gyeyak"||el.id==="deunggi"||el.id==="type"){dualCheck();}
   run();
 })});
 document.querySelectorAll("#claims .chip").forEach(function(c){c.addEventListener("click",function(){
@@ -593,6 +606,34 @@ function agFetch(){
     $("ag-msg").textContent="⚠️ 로컬 서버 없음 — 터미널에서 python serve.py 실행 후 localhost:8000 에서 써야 집계됩니다.";
   });
 }
+/* 양수 시점 두 갈래 — 인가 일자가 있으면 계약일·등기일 각각의 §39② 발동을 본다 */
+var ANCHORS=null;
+function dualCheck(){
+  var box=$("dualBox"); if(!box) return;
+  var g=$("gyeyak").value, d=$("deunggi").value;
+  if(!ANCHORS||!g||!d){box.innerHTML="";return}
+  var law=(GATE&&GATE.law)||$("type").value;
+  var key=(law==="재건축")?"조합설립인가일":"관리처분인가일";
+  var ing=ANCHORS[key];
+  if(!ing){
+    box.innerHTML='<div class="dual same">양수 시점 비교: '+esc(key)+' 를 몰라 판별 보류'+
+      ' <span class="ln">(인가일을 알면 계약↔등기 사이에 결론이 갈리는지 볼 수 있습니다)</span></div>';
+    return;
+  }
+  var a=(g>=ing), b=(d>=ing);
+  var lbl=function(x){return x?"인가 후 양수 → 제한 발동":"인가 전 양수 → 제한 없음"};
+  if(a!==b){
+    box.innerHTML='<div class="dual split"><b>⚠ 양수 시점에 따라 결론이 갈립니다</b>'+
+      '<div class="ln">'+esc(key)+' '+esc(ing)+'</div>'+
+      '<div class="ln">계약 '+esc(g)+' → '+lbl(a)+'</div>'+
+      '<div class="ln">등기 '+esc(d)+' → '+lbl(b)+'</div>'+
+      '<div class="ln">§39② 의 \'양수\' 가 계약인지 등기인지는 유권해석이 필요합니다 — 전문가 확인</div></div>';
+  }else{
+    box.innerHTML='<div class="dual same">양수 시점 비교: 두 날짜 모두 '+lbl(a)+
+      ' <span class="ln">— 시점 논란이 결과를 바꾸지 않습니다ㅤ('+esc(key)+' '+esc(ing)+')</span></div>';
+  }
+}
+
 /* 주소 한 줄 조회 — serve.py /api/address */
 function adRender(d){
   var box=$("ad-zone"), a=d.addr;
@@ -621,6 +662,7 @@ function adRender(d){
   ZONE = d.designated?{designated:true,name:d.zoneName,kind:d.zoneKind,area:d.zoneArea,
                        notice:d.notice,promo:d.promo}:null;
   GATE = d.site?{gate:d.site.gate,stage:d.site.stage,why:d.site.why,law:d.site.law}:null;
+  ANCHORS = (d.site && d.site.anchors) ? d.site.anchors : null;
   if(d.site && d.site.anchors){
     var A=d.site.anchors, yr=function(s){return s?parseInt(s.slice(0,4),10):null};
     if(A["조합설립인가일"]) $("johap").value=yr(A["조합설립인가일"]);
@@ -680,6 +722,7 @@ function adRender(d){
       (d.aging.unknown?" (미상 "+d.aging.unknown+"동, 상한 "+(d.aging.hi*100).toFixed(1)+"%)":"")+
       " — 구역 경계가 아니라 "+d.aging.unit+" 단위라 잠정";
   }
+  dualCheck();
   run();
 }
 function adFetch(){
