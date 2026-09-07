@@ -65,7 +65,7 @@ def _parse_date(s: str):
 
 
 def run(keyword: str, mock: bool = False, unit: str = "road",
-        계약일=None, 등기일=None):
+        계약일=None, 등기일=None, 등기부=None, 초본=None):
     import juso
 
     out = {"keyword": keyword}
@@ -287,6 +287,16 @@ def run(keyword: str, mock: bool = False, unit: str = "road",
                                 f"현재 '{site.stage}'"))
         if el is not None:
             kw.update(EL.to_case_facts(el, site))
+        # 서류를 주면 소유·거주까지 P1 으로 채워진다
+        if 등기부 or 초본:
+            import docparse as DP
+            dg = DP.parse_deungi(open(등기부, encoding="utf-8").read()) if 등기부 else None
+            cb = DP.parse_chobon(open(초본, encoding="utf-8").read()) if 초본 else None
+            지번 = " ".join((addr.jibunAddr or "").split()[-2:])
+            print("=" * 62)
+            print(DP.render(dg, cb, 지번))
+            print()
+            kw.update(DP.to_case_facts(dg, cb, 지번))
         rep = EN.evaluate(EN.Case(**kw))
         out["succ"] = rep
         print()
@@ -306,13 +316,17 @@ def run(keyword: str, mock: bool = False, unit: str = "road",
                     why = f" — {r0.value or r0.missing_input or r0.name}"
                 print(f"    {icon[v]} {ex.label}{why}")
         if el is not None and kw.get("조합설립인가일"):
-            print("    ↑ 재건축 3년 트리(예외5~7)는 위 인가 일자로 자동 판정됨"
-                  " · 소유 3년 요건은 등기부 필요")
+            print("    ↑ 재건축 3년 트리(예외5~7)는 위 인가 일자로 자동 판정됨")
         print()
-        print("  나머지 예외는 개인 서류가 있어야 확정됩니다 (공공데이터에 없음):")
-        print("    📄 등기부등본 (매도인 취득일)")
-        print("    📄 주민등록초본 (매도인 거주기간, 배우자·직계존비속 합산)")
-        print("    📄 (해당 시) 상속·해외이주·경매 증빙")
+        docs = rep.요청서류
+        if docs:
+            print("  ── 이 자료를 주시면 판정이 확정됩니다 ──")
+            for d_ in docs:
+                print(f"    📄 {d_}")
+            if not (등기부 or 초본):
+                print("    (등기부·초본은 텍스트로 붙여 --등기부 / --초본 으로 넘길 수 있습니다)")
+        else:
+            print("  더 필요한 자료가 없습니다 — 위 결과가 최종입니다.")
     elif site is None or site.승계제한[0] == "확인필요":
         print()
         print("  13예외 판정에 필요한 서류 (공공데이터에 없음 — 업로드가 유일한 경로):")
@@ -336,13 +350,18 @@ def main(argv=None):
                    help="계약일 — 등기일과 함께 주면 두 시점을 각각 판정")
     p.add_argument("--등기", "--register", dest="등기", metavar="YYYY-MM-DD",
                    help="등기(잔금)일")
+    p.add_argument("--등기부", dest="등기부", metavar="파일",
+                   help="등기부등본 텍스트 — 소유기간을 P1 으로 채운다")
+    p.add_argument("--초본", dest="초본", metavar="파일",
+                   help="주민등록초본 텍스트 — 거주기간을 P1 으로 채운다")
     a = p.parse_args(argv)
     kw = " ".join(a.keyword).strip()
     if not kw:
         p.error('주소를 입력하세요. 예: python check.py "서울 관악구 신림동 10-10"')
     run(kw, a.mock, a.by,
         _parse_date(a.계약) if a.계약 else None,
-        _parse_date(a.등기) if a.등기 else None)
+        _parse_date(a.등기) if a.등기 else None,
+        a.등기부, a.초본)
 
 
 if __name__ == "__main__":

@@ -131,6 +131,16 @@ fieldset{border:none;margin:0;padding:0}
 .zbanner b{color:var(--go)}
 .zbanner .meta{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);margin-top:3px}
 .zbanner .warn{color:var(--hold);font-size:11px;margin-top:4px}
+.docs{background:var(--inset);border:1px solid var(--line-2);border-radius:6px;padding:10px 11px;margin:8px 0 10px}
+.docs textarea{width:100%;min-height:52px;font-family:var(--mono);font-size:11px;padding:6px 7px;
+  border:1px solid var(--line-2);border-radius:4px;background:var(--surface);color:var(--ink);resize:vertical}
+.docs .lb{font-size:11px;color:var(--ink-2);margin:6px 0 3px}
+.docs button{font-family:var(--mono);font-size:12px;padding:6px 12px;border:1px solid var(--accent);
+  background:var(--accent);color:var(--ground);border-radius:4px;font-weight:600;margin-top:7px}
+.docs .msg{font-size:11px;color:var(--ink-3);margin-top:6px;font-family:var(--mono);line-height:1.55}
+.docs .msg b{color:var(--go)}
+.p1{display:inline-block;margin-left:5px;padding:0 5px;border-radius:3px;font-size:9.5px;font-family:var(--mono);
+  background:var(--go-bg);color:var(--go);border:1px solid var(--go-line);vertical-align:1px}
 .dual{margin:2px 0 10px;padding:9px 11px;border-radius:6px;font-size:11.5px;line-height:1.55;border:1px solid}
 .dual.split{background:var(--no-bg);border-color:var(--no-line)}
 .dual.same{background:var(--inset);border-color:var(--line-2);color:var(--ink-2)}
@@ -277,6 +287,17 @@ a{color:var(--accent)}
 
         <fieldset>
           <div class="leg">② 매수인 (입주권 자격 · 매도인 기준)</div>
+          <div class="docs">
+            <div class="af-h" style="color:var(--accent)">📄 서류 붙여넣기
+              <span>· 원문에서 읽어야 근거등급 P1 — 손으로 넣은 값만으론 확정되지 않습니다</span></div>
+            <div class="lb">등기부등본 (갑구 포함 전체)</div>
+            <textarea id="doc-deungi" placeholder="등기사항전부증명서 내용을 그대로 붙여넣으세요"></textarea>
+            <div class="lb">주민등록초본 (주소 변동 사항 포함)</div>
+            <textarea id="doc-chobon" placeholder="초본의 주소 변동 이력을 붙여넣으세요"></textarea>
+            <button id="doc-btn" type="button">서류에서 읽기</button>
+            <div class="msg" id="doc-msg">브라우저 밖으로 나가지 않습니다 — 로컬 서버가 값만 읽고 원문은 저장하지 않습니다.
+              주민번호·이름은 마스킹됩니다.</div>
+          </div>
           <div class="row">
             <div class="f"><label>내 계약일 <span class="hint">(양수 시점 논란)</span></label>
               <input id="gyeyak" type="date"></div>
@@ -419,6 +440,9 @@ function evalCriteria(){
 }
 
 var GATE=null;   /* 정보몽땅 진행단계에서 온 §39② 발동 여부 {gate, stage, why} */
+/* 근거등급 — 서류에서 읽은 값만 P1. 손으로 넣은 값은 T 라 단독으로 MET 을 못 만든다.
+   (파이썬 engine 의 'T 단독 MET 금지' 와 같은 규칙: NOT_MET 은 낼 수 있고 MET 만 막는다) */
+var DOCSRC={own:null, reside:null, sangsok:false};
 
 /* ---------- C. 자격 (조합원 지위 승계) ---------- */
 function evalSucc(){
@@ -451,11 +475,18 @@ function evalSucc(){
   var e1=[];
   e1.push(onehouse?{v:"MET",t:"1세대 1주택자",val:"1주택"}
                   :{v:"NOT_MET",t:"1세대 1주택자",val:"다주택 → 4호 해당 없음"});
-  if(own===null) e1.push({v:"INSUFFICIENT",t:"소유 10년",m:"매도인 등기부(취득일)"});
-  else if(myeong!==null&&myeong!==own) e1.push({v:"CONFLICT",t:"소유기간",m:"등기부 취득("+own+") ≠ 조합명부("+myeong+") — 전문가 확인",val:"충돌"});
-  else e1.push({v:(BASE-own>=10)?"MET":"NOT_MET",t:"소유 10년",val:"취득 "+own+" → "+(BASE-own)+"년"});
-  if(reside===null) e1.push({v:"INSUFFICIENT",t:"거주 5년(합산)",m:"매도인 주민등록초본(주소변동)"});
-  else e1.push({v:(BASE-reside>=5)?"MET":"NOT_MET",t:"거주 5년",val:"거주개시 "+reside+" → "+(BASE-reside)+"년"});
+  function 기간(v, need, name, doc, src){
+    if(v===null) return {v:"INSUFFICIENT",t:name,m:doc};
+    var yrs=BASE-v, met=(yrs>=need);
+    var r={v:met?"MET":"NOT_MET",t:name,val:v+" → "+yrs+"년 (기준 "+need+"년)",p1:(src==="P1")};
+    /* T 단독으로는 MET 불가 — 화면에 써 붙인 규율을 여기서도 지킨다 */
+    if(met && src!=="P1"){ r.v="INSUFFICIENT"; r.m=doc+" (입력값만으론 확정 불가)"; }
+    return r;
+  }
+  if(myeong!==null&&own!==null&&myeong!==own)
+    e1.push({v:"CONFLICT",t:"소유기간",m:"등기부 취득("+own+") ≠ 조합명부("+myeong+") — 전문가 확인",val:"충돌"});
+  else e1.push(기간(own,10,"소유 10년","매도인 등기부(취득일)",DOCSRC.own));
+  e1.push(기간(reside,5,"거주 5년(합산)","매도인 주민등록초본(주소변동)",DOCSRC.reside));
   E.push(andEx("ex1 장기보유(10년 소유·5년 거주)","법 §39②4호·령 §37①",e1));
 
   // ex2/3/4/8 특수정황
@@ -481,6 +512,7 @@ function evalSucc(){
   return {overall:overall,exs:E,ask:ask};
 }
 function andEx(name,law,parts){
+  /* 하위 요건의 P1 표시를 살려 보낸다 */
   var vs=parts.map(function(p){return p.v});
   var v=vs.indexOf("NOT_MET")>=0?"NOT_MET":vs.indexOf("CONFLICT")>=0?"CONFLICT":vs.indexOf("INSUFFICIENT")>=0?"INSUFFICIENT":"MET";
   var miss=parts.filter(function(p){return p.v==="INSUFFICIENT"}).map(function(p){return p.m})[0];
@@ -511,6 +543,7 @@ function reqRow(r){
   var ev=r.ev?'<div class="req-ev">'+ (r.miss&&r.verdict==="INSUFFICIENT"?'📄 <b>'+esc(r.miss)+'</b> — ':'') + esc(r.ev)+'</div>':
     (r.miss&&r.verdict==="INSUFFICIENT"?'<div class="req-ev">📄 <b>'+esc(r.miss)+'</b> 필요</div>':'');
   var pv=r.provisional?'<span class="prov">잠정 · 구역 경계 아님</span>':'';
+  if(r.p1) pv+='<span class="p1">P1 원본</span>';
   return '<div class="req'+(r.verdict==="NA"?' na-row':'')+'"><div class="req-top"><span class="dot '+r.verdict+'"></span>'+
     '<span class="req-name">'+esc(r.name)+pv+law+'</span>'+v+'</div>'+ev+'</div>';
 }
@@ -545,16 +578,23 @@ function run(){
 
 /* presets */
 var PRE={
-  green:{type:"재개발",promo:0,toohee:1,area:15000,nohu:70,gwaso:45,jeopdo:"",hosu:"",nohuA:"",built:1990,struct:"RC공동주택",own:2011,reside:2013,myeong:"",johap:"",saeop:"",chak:"",claims:[]},
+  /* green 은 '이렇게 하면 통과한다' 를 보여주는 예시다. 서류 없이는 확정되지 않으므로
+     샘플 서류까지 함께 채운다 — [서류에서 읽기] 를 누르면 P1 으로 승격돼 실제로 통과한다. */
+  green:{type:"재개발",promo:0,toohee:1,area:15000,nohu:70,gwaso:45,jeopdo:"",hosu:"",nohuA:"",built:1990,struct:"RC공동주택",own:2011,reside:2013,myeong:"",johap:"",saeop:"",chak:"",claims:[],
+    deungi:"【 갑    구 】 ( 소유권에 관한 사항 )\n순위번호   등 기 목 적      접        수          등 기 원 인      권리자 및 기타사항\n1         소유권보존       1997년8월21일 제45678호                 소유자 김철수 700101-1234567\n2         소유권이전       2011년6월14일 제12345호  2011년5월20일 매매  소유자 홍길동 800202-2345678\n【 을    구 】 ( 소유권 이외의 권리에 관한 사항 )\n1         근저당권설정     2015년1월5일 제100호     2015년1월5일     채무자 홍길동", chobon:"주민등록표 (초본)\n성명 : 홍길동   주민등록번호 : 800202-2345678\n1  서울특별시 강남구 대치동 316 은마아파트 12동 305호   2013년 4월 2일   전입\n2  서울특별시 관악구 신림동 675-159 덕원빌라 101호      2021년 6월 1일   전입"},
   cash:{type:"재개발",promo:0,toohee:1,area:15000,nohu:70,gwaso:45,jeopdo:"",hosu:"",nohuA:"",built:1990,struct:"RC공동주택",own:2018,reside:2022,myeong:"",johap:"",saeop:"",chak:"",claims:[]},
   hold:{type:"재개발",promo:0,toohee:1,area:15000,nohu:70,gwaso:"",jeopdo:"",hosu:"",nohuA:"",built:1990,struct:"RC공동주택",own:2011,reside:"",myeong:"",johap:"",saeop:"",chak:"",claims:[]}
 };
 function applyPreset(p){var d=PRE[p];if(!d)return;
-  ZONE=null; GATE=null; PROXY=false; ANCHORS=null;
+  ZONE=null; GATE=null; PROXY=false; ANCHORS=null; DOCSRC={own:null,reside:null,sangsok:false};
   $("ad-zone").innerHTML=""; if($("dualBox")) $("dualBox").innerHTML="";
   ["type","struct"].forEach(function(k){$(k).value=d[k]});
   ["promo","toohee"].forEach(function(k){$(k).checked=!!d[k]});
   ["area","nohu","gwaso","jeopdo","hosu","nohuA","built","own","reside","myeong","johap","saeop","chak"].forEach(function(k){$(k).value=d[k]});
+  $("doc-deungi").value=d.deungi||""; $("doc-chobon").value=d.chobon||"";
+  $("doc-msg").textContent=d.deungi
+    ? "샘플 서류를 채웠습니다 — [서류에서 읽기] 를 누르면 P1 으로 승격돼 확정됩니다."
+    : "브라우저 밖으로 나가지 않습니다 — 로컬 서버가 값만 읽고 원문은 저장하지 않습니다.";
   document.querySelectorAll("#claims .chip").forEach(function(c){c.setAttribute("aria-pressed",d.claims.indexOf(c.dataset.c)>=0?"true":"false")});
   run();
 }
@@ -565,6 +605,8 @@ document.querySelectorAll("input,select").forEach(function(el){el.addEventListen
   if(["area","nohu","nohuA","type","promo"].indexOf(el.id)>=0){ZONE=null;}
   if(["type","johap","saeop","chak","toohee"].indexOf(el.id)>=0){GATE=null;}
   if(el.id==="nohu"||el.id==="nohuA"){PROXY=false;}
+  if(el.id==="own"){DOCSRC.own=null;}
+  if(el.id==="reside"){DOCSRC.reside=null;}
   if(el.id==="gyeyak"||el.id==="deunggi"||el.id==="type"){dualCheck();}
   run();
 })});
@@ -625,6 +667,7 @@ function agFetch(){
 }
 /* 양수 시점 두 갈래 — 인가 일자가 있으면 계약일·등기일 각각의 §39② 발동을 본다 */
 var ANCHORS=null;
+var ADDR=null;
 function dualCheck(){
   var box=$("dualBox"); if(!box) return;
   var g=$("gyeyak").value, d=$("deunggi").value;
@@ -688,6 +731,7 @@ function adRender(d){
   ZONE = d.designated?{designated:true,name:d.zoneName,kind:d.zoneKind,area:d.zoneArea,
                        notice:d.notice,promo:d.promo}:null;
   GATE = d.site?{gate:d.site.gate,stage:d.site.stage,why:d.site.why,law:d.site.law}:null;
+  ADDR = d.addr || null;
   ANCHORS = (d.site && d.site.anchors) ? d.site.anchors : null;
   if(d.site && d.site.anchors){
     var A=d.site.anchors, yr=function(s){return s?parseInt(s.slice(0,4),10):null};
@@ -762,6 +806,45 @@ function adFetch(){
     $("ad-msg").textContent="⚠️ 로컬 서버 없음 — 터미널에서 python serve.py 실행 후 localhost:8000 에서 쓰세요.";
   });
 }
+/* 서류 붙여넣기 → 로컬 파싱 (원문은 저장하지 않는다) */
+$("doc-btn").addEventListener("click",function(){
+  var de=$("doc-deungi").value.trim(), ch=$("doc-chobon").value.trim();
+  if(!de&&!ch){$("doc-msg").textContent="붙여넣은 내용이 없습니다.";return}
+  var jibun=(ADDR&&ADDR.jibun)?ADDR.jibun.split(" ").slice(-2).join(" "):"";
+  $("doc-msg").textContent="읽는 중…";
+  fetch("/api/parse",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({deungi:de,chobon:ch,jibun:jibun})})
+   .then(function(r){return r.json()}).then(function(d){
+    if(!d.ok){$("doc-msg").textContent="⚠️ "+(d.error||"읽기 실패");return}
+    var say=[];
+    if(d.deungi){
+      if(d.deungi["취득일"]){
+        $("own").value=parseInt(d.deungi["취득일"].slice(0,4),10);
+        DOCSRC.own="P1";
+        say.push("<b>취득 "+esc(d.deungi["취득일"])+"</b>"+(d.deungi["원인"]?" ("+esc(d.deungi["원인"])+")":""));
+      } else { DOCSRC.own=null; say.push("취득일을 못 읽음"); }
+      if(d.deungi["상속이혼"]){
+        DOCSRC.sangsok=true;
+        var chip=document.querySelector('.chip[data-c="sangsokchwideuk"]');
+        if(chip) chip.setAttribute("aria-pressed","true");
+        say.push("상속·이혼 취득 → §39② '양수' 아님");
+      }
+    }
+    if(d.chobon){
+      if(d.chobon["거주개시일"]){
+        $("reside").value=parseInt(d.chobon["거주개시일"].slice(0,4),10);
+        DOCSRC.reside="P1";
+        say.push("<b>거주개시 "+esc(d.chobon["거주개시일"])+"</b>");
+      } else { DOCSRC.reside=null; say.push("전입 기록을 못 찾음"); }
+    }
+    (d.warn||[]).forEach(function(w){say.push("⚠ "+esc(w))});
+    $("doc-msg").innerHTML=say.join(" · ")+"<br>원문은 저장하지 않았고 주민번호·이름은 마스킹했습니다.";
+    run();
+  }).catch(function(){
+    $("doc-msg").textContent="⚠️ 로컬 서버 없음 — python serve.py 실행 후 localhost:8000 에서 쓰세요.";
+  });
+});
+
 $("ad-btn").addEventListener("click",adFetch);
 $("ad-q").addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();adFetch()}});
 

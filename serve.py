@@ -239,6 +239,44 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_POST(self):
+        parts = urllib.parse.urlparse(self.path)
+        if parts.path != "/api/parse":
+            self.send_error(404)
+            return
+        # 서류 원문은 여기서만 쓰고 저장하지 않는다. 값과 마스킹된 인용만 돌려준다.
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            if n > 2_000_000:
+                self._json({"ok": False, "error": "문서가 너무 큽니다(2MB 초과)"})
+                return
+            body = json.loads(self.rfile.read(n).decode("utf-8") or "{}")
+            import docparse
+            d = docparse.parse_deungi(body["deungi"]) if body.get("deungi") else None
+            c = docparse.parse_chobon(body["chobon"]) if body.get("chobon") else None
+            jibun = (body.get("jibun") or "").strip()
+            out = {"ok": True, "warn": (d.warn if d else []) + (c.warn if c else [])}
+            if d is not None:
+                r = d.최근취득
+                out["deungi"] = {
+                    "취득일": r.date.isoformat() if r else None,
+                    "원인": r.reason if r else None,
+                    "인용": r.line if r else None,
+                    "상속이혼": d.상속이혼,
+                    "이력": [{"date": x.date.isoformat(), "kind": x.kind,
+                              "reason": x.reason} for x in d.rows if x.date],
+                }
+            if c is not None:
+                r = c.거주개시(jibun)
+                out["chobon"] = {
+                    "거주개시일": r.date.isoformat() if r else None,
+                    "인용": r.line if r else None,
+                    "건수": len(c.rows),
+                }
+            self._json(out)
+        except Exception as e:
+            self._json({"ok": False, "error": type(e).__name__ + ": " + str(e)})
+
     def do_GET(self):
         parts = urllib.parse.urlparse(self.path)
         if parts.path == "/api/gather":
