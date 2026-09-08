@@ -23,6 +23,7 @@ TIMEOUT = 30
 _last: dict = {}
 _robots: dict = {}
 _denyall: dict = {}
+_raw: dict = {}
 
 
 class Blocked(Exception):
@@ -43,6 +44,41 @@ def _fetch_robots(host: str):
     except Exception:
         rp = None
     return rp, raw
+
+
+def _rules(raw: str) -> list:
+    """'*' 에게 주는 Allow/Disallow 규칙만 뽑는다. [(허용여부, 경로), …]"""
+    out, applies = [], False
+    for line in raw.splitlines():
+        t = line.split("#", 1)[0].strip()
+        if not t:
+            continue
+        k, _, v = t.partition(":")
+        k, v = k.strip().lower(), v.strip()
+        if k == "user-agent":
+            applies = v in ("*", UA)
+        elif applies and k in ("allow", "disallow") and v:
+            out.append((k == "allow", v))
+    return out
+
+
+def _longest_match(raw: str, path: str):
+    """RFC 9309 — 가장 구체적인(긴) 규칙이 이긴다. 못 정하면 None.
+
+    파이썬 robotparser 는 '첫 매칭' 을 쓰는 옛 규칙이라, 'Disallow: /' 뒤에
+    'Allow: /news' 를 둔 사이트(서울시)를 통째로 막힌 것으로 읽는다.
+    사이트가 Allow 를 명시했다면 그건 허용하겠다는 뜻이다.
+    """
+    best = None
+    for allow, pat in _rules(raw):
+        p = pat.rstrip("$")
+        if not path.startswith(p):
+            continue
+        if pat.endswith("$") and path != p:
+            continue
+        if best is None or len(p) > best[1]:
+            best = (allow, len(p))
+    return None if best is None else best[0]
 
 
 def _deny_all(raw: str) -> bool:
@@ -72,13 +108,17 @@ def allowed(url: str) -> bool:
         rp, raw = _fetch_robots(host)
         _robots[host] = rp
         _denyall[host] = _deny_all(raw)
+        _raw[host] = raw
     if _denyall.get(host):
         return False
     rp = _robots[host]
     if rp is None:
         return True              # robots 를 못 읽으면 허용하되 간격은 지킨다
-    # UA 를 밝힌 크롤러 기준으로 판정하고, '*' 규칙도 함께 본다
-    return rp.can_fetch(UA, url) and rp.can_fetch("*", url)
+    if rp.can_fetch(UA, url) and rp.can_fetch("*", url):
+        return True
+    # 표준 파서가 막았어도, 더 구체적인 Allow 가 있으면 그게 사이트의 뜻이다
+    path = urllib.parse.urlsplit(url).path or "/"
+    return _longest_match(_raw.get(host, ""), path) is True
 
 
 def _wait(host: str):

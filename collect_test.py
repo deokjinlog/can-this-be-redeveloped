@@ -35,6 +35,21 @@ def c1():
     return "고아 Disallow:/ 를 차단으로"
 
 
+@case("①-b robots: 'Disallow: /' 뒤의 Allow 가 더 구체적이면 그게 이긴다")
+def c1b():
+    # 파이썬 robotparser 는 '첫 매칭' 을 쓰는 옛 규칙이라, 서울시처럼
+    # Disallow: / 뒤에 Allow 목록을 둔 사이트를 통째로 막힌 것으로 읽는다.
+    raw = ("User-agent: *\nDisallow: /\nDisallow: /seoul/sos\n"
+           "Allow: /news\nAllow: /seoul\nAllow: /$\n")
+    lm = http._longest_match
+    assert lm(raw, "/news/news_notice.do") is True
+    assert lm(raw, "/seoul/gosi.do") is True
+    assert lm(raw, "/seoul/sos/x.do") is False, "더 구체적인 Disallow 가 이겨야 한다"
+    assert lm(raw, "/admin/secret.do") is False
+    assert lm(raw, "/") is True, "Allow: /$ 는 루트만"
+    return "최장 매칭 우선(RFC 9309)"
+
+
 @case("②키워드 필터 — 제목에 하나도 없으면 대상이 아니다")
 def c2():
     assert set(hit("신림5구역 재개발사업 정비구역 지정")) == {"정비구역", "재개발"}
