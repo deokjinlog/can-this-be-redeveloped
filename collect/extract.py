@@ -4,7 +4,7 @@
 LibreOffice 가 없고(sudo 불가) 설치도 못 한다 → HWP 는 pyhwp(uv) 로 텍스트만 뽑는다.
 어차피 목적이 텍스트라 PDF 를 경유할 이유가 없다.
 
-  PDF  : pdfminer.six / pypdf 중 되는 것 (uv run --with 로 호출)
+  PDF  : pdfminer.six
   HWP  : pyhwp 의 hwp5txt
   HWPX : zip + XML 이라 표준 라이브러리로 읽는다
 """
@@ -18,6 +18,23 @@ import zipfile
 from . import paths
 
 UV = os.path.expanduser("~/.local/bin/uv")
+VENV = os.path.join(paths.ROOT, ".venv-extract")   # 리포 밖. 한 번 만들고 재사용
+
+
+def _tools() -> dict:
+    """추출 전용 환경.
+
+    `uv run --with` 를 파일마다 부르면 매번 의존성을 다시 풀어 66개에 수 분이 걸린다
+    (실측: 100건에서 사실상 멈춤). venv 를 한 번 만들고 그 안의 실행파일을 직접 쓴다.
+    """
+    bin_ = os.path.join(VENV, "bin")
+    t = {n: os.path.join(bin_, n) for n in ("hwp5txt", "python")}
+    if not os.path.exists(t["hwp5txt"]):
+        subprocess.run([UV, "venv", VENV], capture_output=True, timeout=300)
+        subprocess.run([UV, "pip", "install", "--quiet", "--python", t["python"],
+                        "pyhwp", "six", "olefile", "pdfminer.six"],
+                       capture_output=True, timeout=900)
+    return t
 
 
 def _hwpx(path: str) -> str:
@@ -57,24 +74,28 @@ def to_text(path: str, fmt: str = "") -> tuple[str, str]:
     확장자는 믿지 않는다 — 이름이 .hwpx 인데 내용이 구형 HWP 인 파일이 실제로 있다."""
     from .notices import sniff
     ext = fmt or sniff(path) or os.path.splitext(path)[1].lower().lstrip(".")
+    t = _tools()
     if ext == "pdf":
-        for pkg, mod in (("pdfminer.six", "pdfminer.high_level"), ("pypdf", "pypdf")):
-            code = ("import sys\n"
-                    "from pdfminer.high_level import extract_text; print(extract_text(sys.argv[1]))"
-                    if mod.startswith("pdfminer") else
-                    "import sys,pypdf\n"
-                    "print('\\n'.join((p.extract_text() or '') for p in pypdf.PdfReader(sys.argv[1]).pages))")
-            ok, out = _run([UV, "run", "--quiet", "--with", pkg, "python", "-c", code, path])
-            if ok:
-                return out, f"pdf/{pkg}"
-        return "", "pdf 추출 실패"
+        ok, out = _run([t["python"], "-c",
+                        "import sys\nfrom pdfminer.high_level import extract_text\n"
+                        "print(extract_text(sys.argv[1]))", path])
+        if ok:
+            return out, "pdf/pdfminer"
+        # 텍스트 레이어가 없는 스캔본 — 실패가 아니라 'OCR 이 필요한 것' 이다.
+        # 다음 단계(VLM 추출)가 골라야 할 대상이므로 사유를 구분해 남긴다.
+        code = ("import sys\nfrom pdfminer.high_level import extract_text\n"
+                "sys.exit(0 if extract_text(sys.argv[1]).strip() else 9)")
+        r = subprocess.run([t["python"], "-c", code, path], capture_output=True, timeout=120)
+        if r.returncode == 9:
+            return "", "이미지 PDF(텍스트 레이어 없음) — OCR 필요"
+        return "", f"pdf 실패: {out[:80]}"
     if ext == "hwpx":
         try:
             return _hwpx(path), "hwpx/zip"
         except Exception as e:
             return "", f"hwpx 실패: {type(e).__name__}"
     if ext == "hwp":
-        ok, out = _run([UV, "run", "--quiet", "--with", "pyhwp", "--with", "six", "--with", "olefile", "hwp5txt", "--output", "-", path])
+        ok, out = _run([t["hwp5txt"], path])
         return (out, "hwp/pyhwp") if ok else ("", f"hwp 실패: {out[:80]}")
     if ext in ("txt", "csv"):
         return open(path, encoding="utf-8", errors="replace").read(), "plain"
