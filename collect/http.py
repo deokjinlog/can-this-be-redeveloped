@@ -76,7 +76,8 @@ def _longest_match(raw: str, path: str):
             continue
         if pat.endswith("$") and path != p:
             continue
-        if best is None or len(p) > best[1]:
+        # 길이가 같으면 Allow 가 이긴다(RFC 9309)
+        if best is None or len(p) > best[1] or (len(p) == best[1] and allow):
             best = (allow, len(p))
     return None if best is None else best[0]
 
