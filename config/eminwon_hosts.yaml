@@ -1,0 +1,28 @@
+# eminwon 호스트 생존 확인 결과 (collect hosts 가 갱신)
+# 첨부는 이 경로로 못 받는다 — 메타데이터 전용.
+
+강북구: eminwon.gangbuk.go.kr    # 고시 10건
+관악구: eminwon.gwanak.go.kr    # 고시 5건
+광진구: gwangjin.eminwon.seoul.kr    # 응답은 정상, 검색 결과 0
+구로구: eminwon.guro.go.kr    # 고시 7건
+금천구: eminwon.geumcheon.go.kr    # 응답은 정상, 검색 결과 0
+도봉구: dobong.eminwon.seoul.kr    # 고시 2건
+동대문구: eminwon.ddm.go.kr    # 고시 7건
+동작구: dongjak.eminwon.seoul.kr    # 고시 2건
+마포구: eminwon.mapo.go.kr    # 고시 9건
+서대문구: eminwon.sdm.go.kr    # 고시 7건
+서초구: eminwon.seocho.go.kr    # 고시 14건
+성동구: eminwon.sd.go.kr    # 고시 4건
+송파구: songpa.eminwon.seoul.kr    # 응답은 정상, 검색 결과 0
+양천구: eminwon.yangcheon.go.kr    # 고시 6건
+영등포구: eminwon.ydp.go.kr    # 고시 4건
+용산구: eminwon.yongsan.go.kr    # 고시 6건
+은평구: eminwon.ep.go.kr    # 고시 22건
+종로구: jongno.eminwon.seoul.kr    # 응답은 정상, 검색 결과 0
+중랑구: eminwon.jungnang.go.kr    # 응답은 정상, 검색 결과 0
+#강남구: (못 찾음)
+#강동구: (못 찾음)
+#강서구: (못 찾음)
+#노원구: (못 찾음)
+#성북구: (못 찾음)
+#중구: (못 찾음)

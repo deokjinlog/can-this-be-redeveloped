@@ -1,0 +1,106 @@
+"""첨부 → 텍스트.
+
+관악구 실측으로는 첨부가 대부분 PDF 다. HWP 가 섞이면 변환이 필요한데 이 환경엔
+LibreOffice 가 없고(sudo 불가) 설치도 못 한다 → HWP 는 pyhwp(uv) 로 텍스트만 뽑는다.
+어차피 목적이 텍스트라 PDF 를 경유할 이유가 없다.
+
+  PDF  : pdfminer.six / pypdf 중 되는 것 (uv run --with 로 호출)
+  HWP  : pyhwp 의 hwp5txt
+  HWPX : zip + XML 이라 표준 라이브러리로 읽는다
+"""
+import csv
+import glob
+import os
+import re
+import subprocess
+import zipfile
+
+from . import paths
+
+UV = os.path.expanduser("~/.local/bin/uv")
+
+
+def _hwpx(path: str) -> str:
+    """HWPX 는 zip + XML 이라 표준 라이브러리로 읽는다.
+
+    Contents/ 전체를 읽으면 header.xml 의 번호매기기·스타일 정의까지 딸려와
+    본문 앞에 '^1. ^2. ^3)' 같은 찌꺼기가 붙는다 → 본문(section*.xml)만 읽는다.
+    """
+    with zipfile.ZipFile(path) as z:
+        names = [n for n in z.namelist()
+                 if re.search(r"section\d*\.xml$", n, re.I)]
+        if not names:      # 구조가 다르면 Contents 전체로 물러선다
+            names = [n for n in z.namelist()
+                     if n.startswith("Contents/") and n.endswith(".xml")]
+        buf = []
+        for n in sorted(names):
+            x = z.read(n).decode("utf-8", "replace")
+            x = re.sub(r"<hp:lineBreak[^>]*/>|</hp:p>", "\n", x)
+            buf.append(re.sub(r"<[^>]+>", " ", x))
+    t = " ".join(buf)
+    t = re.sub(r"[ \t]+", " ", t)
+    return re.sub(r"\n\s*\n+", "\n", t).strip()
+
+
+def _run(cmd: list, timeout=120) -> tuple[bool, str]:
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=timeout)
+        if r.returncode == 0 and r.stdout.strip():
+            return True, r.stdout.decode("utf-8", "replace")
+        return False, (r.stderr or b"").decode("utf-8", "replace")[:200]
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
+def to_text(path: str, fmt: str = "") -> tuple[str, str]:
+    """(텍스트, 사유). fmt 를 주면 그걸 쓰고, 없으면 매직바이트로 판정한다.
+    확장자는 믿지 않는다 — 이름이 .hwpx 인데 내용이 구형 HWP 인 파일이 실제로 있다."""
+    from .notices import sniff
+    ext = fmt or sniff(path) or os.path.splitext(path)[1].lower().lstrip(".")
+    if ext == "pdf":
+        for pkg, mod in (("pdfminer.six", "pdfminer.high_level"), ("pypdf", "pypdf")):
+            code = ("import sys\n"
+                    "from pdfminer.high_level import extract_text; print(extract_text(sys.argv[1]))"
+                    if mod.startswith("pdfminer") else
+                    "import sys,pypdf\n"
+                    "print('\\n'.join((p.extract_text() or '') for p in pypdf.PdfReader(sys.argv[1]).pages))")
+            ok, out = _run([UV, "run", "--quiet", "--with", pkg, "python", "-c", code, path])
+            if ok:
+                return out, f"pdf/{pkg}"
+        return "", "pdf 추출 실패"
+    if ext == "hwpx":
+        try:
+            return _hwpx(path), "hwpx/zip"
+        except Exception as e:
+            return "", f"hwpx 실패: {type(e).__name__}"
+    if ext == "hwp":
+        ok, out = _run([UV, "run", "--quiet", "--with", "pyhwp", "--with", "six", "--with", "olefile", "hwp5txt", "--output", "-", path])
+        return (out, "hwp/pyhwp") if ok else ("", f"hwp 실패: {out[:80]}")
+    if ext in ("txt", "csv"):
+        return open(path, encoding="utf-8", errors="replace").read(), "plain"
+    return "", f"미지원 확장자: {ext}"
+
+
+def run(gu: str) -> dict:
+    src = paths.gu_dir(gu, "raw")
+    dst = paths.gu_dir(gu, "text")
+    stat = {"총": 0, "성공": 0, "실패": 0, "by_ext": {}, "fail": []}
+    for p in sorted(glob.glob(os.path.join(src, "*"))):
+        if os.path.isdir(p):
+            continue
+        stat["총"] += 1
+        ext = os.path.splitext(p)[1].lower().lstrip(".")
+        stat["by_ext"][ext] = stat["by_ext"].get(ext, 0) + 1
+        out = os.path.join(dst, os.path.basename(p) + ".txt")
+        if os.path.exists(out) and os.path.getsize(out) > 0:
+            stat["성공"] += 1
+            continue
+        txt, why = to_text(p)
+        if txt.strip():
+            with open(out, "w", encoding="utf-8") as fh:
+                fh.write(txt)
+            stat["성공"] += 1
+        else:
+            stat["실패"] += 1
+            stat["fail"].append((os.path.basename(p), why))
+    return stat

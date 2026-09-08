@@ -1,0 +1,29 @@
+# 서울 자치구 — 코드·영문명(eminwon 호스트 후보)
+# 단일 출처는 geo.SIGUNGU(코드↔이름). 여기엔 수집에 필요한 영문명과 메모만 둔다.
+# 호스트 패턴 두 갈래: eminwon.{en}.go.kr  /  {en}.eminwon.seoul.kr
+
+"11110": {name: 종로구, en: jongno}
+"11140": {name: 중구, en: junggu, alt: [jung|junggu]}
+"11170": {name: 용산구, en: yongsan}
+"11200": {name: 성동구, en: sd, alt: [seongdong]}
+"11215": {name: 광진구, en: gwangjin}
+"11230": {name: 동대문구, en: ddm, alt: [dongdaemun]}
+"11260": {name: 중랑구, en: jungnang}
+"11290": {name: 성북구, en: sb, alt: [seongbuk]}
+"11305": {name: 강북구, en: gangbuk}
+"11320": {name: 도봉구, en: dobong}
+"11350": {name: 노원구, en: nowon}
+"11380": {name: 은평구, en: ep, alt: [eunpyeong]}
+"11410": {name: 서대문구, en: sdm, alt: [seodaemun]}
+"11440": {name: 마포구, en: mapo}
+"11470": {name: 양천구, en: yangcheon}
+"11500": {name: 강서구, en: gangseo}
+"11530": {name: 구로구, en: guro}
+"11545": {name: 금천구, en: geumcheon}
+"11560": {name: 영등포구, en: ydp, alt: [yeongdeungpo]}    # 포털 robots 가 Disallow:/ — CMS 경유 불가
+"11590": {name: 동작구, en: dongjak}    # 포털 robots 가 /portal/bbs/ 차단 — CMS 경유 불가
+"11620": {name: 관악구, en: gwanak}
+"11650": {name: 서초구, en: seocho}
+"11680": {name: 강남구, en: gangnam}
+"11710": {name: 송파구, en: songpa}
+"11740": {name: 강동구, en: gangdong, alt: [gd|gangdong]}
