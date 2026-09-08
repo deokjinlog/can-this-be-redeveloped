@@ -5,15 +5,17 @@ LibreOffice 가 없고(sudo 불가) 설치도 못 한다 → HWP 는 pyhwp(uv) �
 어차피 목적이 텍스트라 PDF 를 경유할 이유가 없다.
 
   PDF  : pdfminer.six
-  HWP  : pyhwp 의 hwp5txt
+  HWP  : OLE 스트림을 직접 읽는다(아래 _hwp 참조) — hwp5txt 는 표를 버린다
   HWPX : zip + XML 이라 표준 라이브러리로 읽는다
 """
 import csv
 import glob
 import os
 import re
+import struct
 import subprocess
 import zipfile
+import zlib
 
 from . import paths
 
@@ -35,6 +37,68 @@ def _tools() -> dict:
                         "pyhwp", "six", "olefile", "pdfminer.six"],
                        capture_output=True, timeout=900)
     return t
+
+
+# HWP5 문단 텍스트의 제어문자는 종류마다 차지하는 길이가 다르다(WCHAR 단위).
+# 이걸 무시하고 통째로 디코드하면 'tbl'·'secd' 같은 태그 바이트가 글자로 섞인다.
+_CTRL_8 = frozenset([1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 14, 15, 16, 17, 18,
+                     19, 20, 21, 22, 23])       # inline/extended: 8 WCHAR
+_CTRL_1 = frozenset([0, 10, 13, 24, 25, 26, 27, 28, 29, 30, 31])
+
+
+def _hwp(path: str) -> str:
+    """구형 HWP(5.x) 본문 — OLE 스트림에서 문단 레코드를 직접 읽는다.
+
+    pyhwp 의 hwp5txt 는 표를 '<표>' 한 줄로 대체해 버린다. 고시문의 구역 제원
+    (면적·호수밀도·접도율)은 대부분 표 안에 있어서, 그대로 쓰면 알맹이가 사라진다
+    (관악 실측: hwp 66건 중 48건이 표를 잃고 평균 1,110자로 쪼그라들었다).
+    """
+    import olefile
+
+    ole = olefile.OleFileIO(path)
+    try:
+        hdr = ole.openstream("FileHeader").read()
+        compressed = bool(struct.unpack("<I", hdr[36:40])[0] & 1)
+        out = []
+        for entry in ole.listdir():
+            if len(entry) < 2 or entry[0] != "BodyText":
+                continue
+            data = ole.openstream(entry).read()
+            if compressed:
+                try:
+                    data = zlib.decompress(data, -15)
+                except zlib.error:
+                    continue
+            i = 0
+            while i + 4 <= len(data):
+                h, = struct.unpack("<I", data[i:i + 4])
+                i += 4
+                tag, size = h & 0x3FF, (h >> 20) & 0xFFF
+                if size == 0xFFF:
+                    size, = struct.unpack("<I", data[i:i + 4])
+                    i += 4
+                body, i = data[i:i + size], i + size
+                if tag != 67:                      # HWPTAG_PARA_TEXT
+                    continue
+                codes = struct.unpack(f"<{len(body) // 2}H", body[:len(body) // 2 * 2])
+                buf, j = [], 0
+                while j < len(codes):
+                    c = codes[j]
+                    if c in _CTRL_8:
+                        buf.append("\n")          # 표 셀·개체 경계
+                        j += 8
+                    elif c in _CTRL_1:
+                        buf.append("\n" if c in (10, 13) else "")
+                        j += 1
+                    else:
+                        buf.append(chr(c))
+                        j += 1
+                out.append("".join(buf))
+    finally:
+        ole.close()
+    t = "\n".join(out)
+    t = re.sub(r"[ \t]+", " ", t)
+    return re.sub(r"\n\s*\n+", "\n", t).strip()
 
 
 def _hwpx(path: str) -> str:
@@ -95,11 +159,31 @@ def to_text(path: str, fmt: str = "") -> tuple[str, str]:
         except Exception as e:
             return "", f"hwpx 실패: {type(e).__name__}"
     if ext == "hwp":
-        ok, out = _run([t["hwp5txt"], path])
-        return (out, "hwp/pyhwp") if ok else ("", f"hwp 실패: {out[:80]}")
+        try:
+            txt = _run_in_venv_hwp(path)
+            if txt.strip():
+                return txt, "hwp/직접파싱"
+        except Exception as e:
+            note = f"{type(e).__name__}"
+        else:
+            note = "본문 없음"
+        ok, out = _run([t["hwp5txt"], path])      # 폴백 — 표는 잃지만 없는 것보단 낫다
+        return (out, "hwp/pyhwp(표 손실)") if ok else ("", f"hwp 실패: {note}")
     if ext in ("txt", "csv"):
         return open(path, encoding="utf-8", errors="replace").read(), "plain"
     return "", f"미지원 확장자: {ext}"
+
+
+def _run_in_venv_hwp(path: str) -> str:
+    """olefile 이 전용 venv 에만 있어 그쪽 파이썬으로 돌린다."""
+    t = _tools()
+    code = ("import sys, json\n"
+            "sys.path.insert(0, %r)\n"
+            "from collect.extract import _hwp\n"
+            "sys.stdout.write(_hwp(sys.argv[1]))" % os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__))))
+    ok, out = _run([t["python"], "-c", code, path])
+    return out if ok else ""
 
 
 def run(gu: str) -> dict:
