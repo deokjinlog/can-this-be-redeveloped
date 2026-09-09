@@ -187,7 +187,8 @@ def run(keyword: str, mock: bool = False, unit: str = "road",
                     print(f"       주택접도율 {ag.접도율:.1%} (기준 40% 이하) "
                           f"— 지목 '도' 기준, 현황도로 미반영")
                 if ag.호수밀도 is not None:
-                    print(f"       호수밀도 {ag.호수밀도:,.0f}호/ha (기준 60호) — 정의 미검증 참고치")
+                    print(f"       호수밀도 {ag.호수밀도:,.0f}동/ha (기준 60동, 조례 §2⑤) "
+                          f"— 층별 세대분포가 없어 근사, 판정엔 안 씀")
             ph = aging.phase_signal(ag) if ag else None
             if ph:
                 print(f"    {ph[0]} 사업 단계 신호: {ph[1]}")

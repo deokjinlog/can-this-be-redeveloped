@@ -46,9 +46,9 @@ class Cfg:
     MIN_AREA = 10_000            # [필수] 구역 면적 ≥ 1만㎡ (심의 인정 시 5천㎡ 완화)
     MIN_AREA_RELAXED = 5_000
     # [선택] 아래 중 1개 이상
-    GWASO_RATIO = 0.40           # 과소필지(토지 90㎡ 미만) ≥ 40%
-    JEOPDO_MAX = 0.40            # 주택접도율(폭4m도로 4m접) ≤ 40%
-    HOSU_DENSITY = 60            # 호수밀도 ha당 ≥ 60호
+    GWASO_RATIO = 0.40           # 과소필지 ≥ 40%   (조례 §2⑨ — 토지면적 90㎡ 미만)
+    JEOPDO_MAX = 0.40            # 주택접도율 ≤ 40%  (조례 §2⑩ — 폭4m 도로에 4m 접)
+    HOSU_DENSITY = 60            # 호수밀도 ≥ 60/ha  (조례 §2⑤ — 1ha당 건축물 동수)
     NOHU_AREA_RATIO = 0.60       # 노후·불량건축물 연면적 ≥ 60%
     SRC = "서울시 도시정비조례 별표1 / 정비사업 정보몽땅(주택정비형 재개발 지정요건)"
 
@@ -79,7 +79,7 @@ class Area:          # 정비구역 (지정 핵심)
     노후불량비율: Optional[Fact] = None  # 0~1 [필수]
     과소필지비율: Optional[Fact] = None  # 0~1 [선택]
     접도율: Optional[Fact] = None        # 0~1 [선택] 낮을수록 열악
-    호수밀도: Optional[Fact] = None      # ha당 동수 [선택]
+    호수밀도: Optional[Fact] = None      # ha당 건축물 동수 (조례 §2⑤) [선택]
     노후연면적비율: Optional[Fact] = None # 0~1 [선택]
     # 노후도를 잰 단위가 '정비구역 경계'가 아니라 법정동·도로·지번블록인 경우.
     # 값 자체는 전수 실측이지만 측정 대상이 요건의 그것과 달라 결론을 확정하지 않는다.

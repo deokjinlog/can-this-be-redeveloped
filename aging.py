@@ -90,6 +90,33 @@ class Bldg:
         return base.year - self.준공연도
 
 
+# ── 호수밀도 분자: 조례 제2조제5호 "건축물 동수" ──
+#
+# 서울특별시 도시 및 주거환경정비 조례 제2조제5호
+#   "호수밀도"란 … 정비구역 면적 1헥타르당 건축되어 있는 건축물의 동수
+#     가. 공동주택·다가구주택은 세대(다가구는 가구)수가 가장 많은 층의 1세대를
+#         1동으로 보며, 나머지 층의 세대수는 계상하지 않는다.
+#     바. 비주거용건축물은 건축면적당 90㎡를 1동으로 보며, 소수점 이하는 버린다.
+#
+# 표제부에 없는 것 — 층별 세대분포(가목), 건축면적(바목), 무허가건축물(나목),
+# 존치 공원·학교(다목), 단독→다세대 변경이력(라목). 그래서 값은 근사다.
+# 검증: 신림8구역 공람공고문(2025, 관악) — 조례기준 745호 vs 거주가구수 2,195
+#       (비율 0.339). 같은 방식으로 관악 표제부 전체를 돌리면 0.387 로,
+#       종전 '세대수+가구수'(비율 1.000, 약 2.9배 과대)보다 실제에 가깝다.
+NONRES_UNIT = 90.0        # 바목 — 비주거용 건축면적 90㎡ = 1동
+
+
+def 동수(b: "Bldg") -> int:
+    """조례 제2조제5호 기준 건축물 동수. 표제부 1행이 항상 1동은 아니다."""
+    세대 = max(b.세대수, 0) + max(b.가구수, 0)
+    층 = max(b.지상층수, 1)
+    if 세대:                                   # 가목 — 가장 많은 층의 세대수 ≈ 총/층수
+        return max(1, round(세대 / 층))
+    if "주택" in b.용도:                        # 단독주택 등
+        return 1
+    return int((b.연면적 / 층) // NONRES_UNIT)  # 바목 — 건축면적은 연면적/층수로 근사
+
+
 # ── 로딩 ──
 
 def _i(s, d=0):
@@ -208,7 +235,7 @@ class Aging:
     jijeok: Optional["Jijeok"] = None    # 구역 단위 집계일 때만
     zone_area: float = 0.0               # 고시면적 (구역 단위일 때)
     범위밖: bool = False                  # 구역이 가진 표제부 CSV 의 법정동 밖에 있다
-    호수: int = 0                        # 세대수 + 가구수 (호수밀도 분자, 정의 미검증)
+    호수: int = 0                        # 조례 §2⑤ 건축물 동수 (호수밀도 분자)
 
     @property
     def 접도율(self) -> Optional[float]:
@@ -350,7 +377,7 @@ def aggregate_zone(bldgs: list[Bldg], zone, parcels=None, 기준: str = "표준3
             continue
         ag.total += 1
         ag.세대수합 += max(b.세대수, 0)
-        ag.호수 += max(b.세대수, 0) + max(b.가구수, 0)
+        ag.호수 += 동수(b)
         t = touch.get(b.pnu)
         if t is not None:
             ag.jijeok.접도분모 += 1
@@ -438,6 +465,16 @@ def cross_check(ag: Aging, site) -> Optional[tuple[bool, str]]:
 
 # ── criteria_engine 연결 ──
 
+def _조례(조: str, 항=None, 호=None, 목=None) -> str:
+    """근거 문구 끝에 붙일 조례 원문. 캐시가 없으면 조용히 생략한다."""
+    try:
+        import law
+        t = law.cite("조례", 조, 항, 호, 목)
+        return f"  |  {law.label('조례', 조, 항, 호, 목)}: {t}" if t else ""
+    except Exception:
+        return ""
+
+
 def to_facts(ag: Aging) -> dict:
     """집계 → Fact. 구간이 확정될 때만 Fact 를 주고, 걸치면 None(=확인필요)."""
     out = {"노후불량비율": None, "노후연면적비율": None, "과소필지비율": None,
@@ -465,7 +502,8 @@ def to_facts(ag: Aging) -> dict:
                 j.과소_lo, Grade.P1, PARCEL.SRC_DOC,
                 f"{ag.label} 필지 {j.필지:,}개 중 90㎡ 미만 {round(j.과소_lo*j.필지)}개"
                 + (f" (밴드 경계 {j.경계필지}개 제외)" if j.경계필지 else "")
-                + f" · 필지면적 합 {j.면적합:,.0f}㎡ = 고시면적의 {j.포착률:.0%}")
+                + f" · 필지면적 합 {j.면적합:,.0f}㎡ = 고시면적의 {j.포착률:.0%}"
+                + _조례("2", None, 9))
     # 주택접도율 — 지목 '도' 기준 근사. 현황도로 미반영이라 실제보다 낮게 나올 수 있고,
     # 낮을수록 요건에 '유리'하므로 기준선 근처에서는 발급하지 않는다(유리한 쪽 반올림 금지).
     r = ag.접도율
@@ -476,7 +514,11 @@ def to_facts(ag: Aging) -> dict:
                 r, Grade.P1, PARCEL.SRC_DOC,
                 f"{ag.label} 건물 {j.접도분모:,}동 중 폭 {PARCEL.ROAD_MIN_W:.0f}m 도로에 "
                 f"{PARCEL.TOUCH_MIN:.0f}m 이상 접한 것 {j.접도충족:,}동 "
-                f"(구역 안 도로필지 {j.도로필지}) · {PARCEL.ROAD_NOTE}")
+                f"(구역 안 도로필지 {j.도로필지}) · {PARCEL.ROAD_NOTE}"
+                + _조례("6", 1, 2, "나"))
+    # 호수밀도는 일부러 뺀다. 정의는 조례 §2⑤ 로 확정됐지만(2026-09 확인), 표제부에
+    # 층별 세대분포·건축면적·무허가건축물이 없어 분자가 근사다. 근사값이 60/ha 를
+    # 넘겼다고 선택요건을 MET 로 올리면 '틀리느니 비운다'를 어긴다. 화면에는 보여준다.
     return out
 
 
@@ -544,7 +586,9 @@ def render_aging(ag: Aging, detail: bool = True) -> str:
             L.append(f"      └ 지목 '도' 기준 근사 — 현황도로(사도·통행로) 미반영")
         if ag.호수밀도 is not None:
             L.append(f"  · 호수밀도 {ag.호수밀도:,.0f}호/ha   (선택요건 기준 {Cfg.HOSU_DENSITY}호 이상)"
-                     f"  [{ag.호수:,}호 / {ag.zone_area/10000:.2f}ha]  — 정의 미검증, 참고치")
+                     f"  [{ag.호수:,}동 / {ag.zone_area/10000:.2f}ha]")
+            L.append("      └ 조례 §2⑤ 동수 산정 — 층별 세대분포·건축면적이 없어 근사"
+                     "(무허가·존치공원 미반영)")
     elif ag.필지수:
         known = ag.필지수 - ag.필지면적미상
         if known:

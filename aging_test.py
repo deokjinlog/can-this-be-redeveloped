@@ -147,6 +147,74 @@ def c10():
 case("⑩집계 단위 분리", c10)
 
 
+# ⑪ 호수밀도 분자는 '세대수'가 아니라 조례 §2⑤ 의 '건축물 동수'다.
+#    아파트 한 동에 100세대가 있어도 1동이다. 이 구분을 놓치면 준공된
+#    아파트 단지가 초고밀 노후지로 읽힌다(관악 신림1구역: 191호/ha → 12동/ha).
+def c11():
+    from aging import 동수
+    아파트 = B(2020, 지번="1-1")
+    아파트.용도, 아파트.세대수, 아파트.지상층수 = "공동주택", 100, 20
+    단독 = B(1980, 지번="2-2")
+    다가구 = B(1995, 지번="3-3")
+    다가구.가구수, 다가구.지상층수 = 8, 4
+    상가 = B(1990, 지번="4-4", 연면적=540.0)
+    상가.용도, 상가.지상층수 = "제2종근린생활시설", 3
+
+    assert 동수(아파트) == 5, 동수(아파트)      # 가목 — 가장 많은 층의 세대수 (100/20)
+    assert 동수(단독) == 1, 동수(단독)
+    assert 동수(다가구) == 2, 동수(다가구)      # 가목 — 8가구/4층
+    assert 동수(상가) == 2, 동수(상가)          # 바목 — 건축면적 180㎡ / 90㎡
+    종전 = sum(max(b.세대수, 0) + max(b.가구수, 0)
+              for b in (아파트, 단독, 다가구, 상가))
+    새 = sum(동수(b) for b in (아파트, 단독, 다가구, 상가))
+    assert 종전 == 108 and 새 == 10, (종전, 새)
+    return f"세대+가구 {종전} → 조례 동수 {새} (아파트 100세대=5동)"
+
+
+case("⑪호수밀도 분자는 세대수가 아니라 조례 §2⑤ 동수", c11)
+
+
+# ⑫ 주택접도율의 도로 폭은 재개발이면 6m 다 (조례 §6①2나, 2024.5.20 신설).
+#    §2⑩ 의 4m 는 주거환경개선구역 몫. 관악 고시문도 개정 전후로 갈린다:
+#    2024-04-23 [35193] "폭 4m이상" / 2024-09-23 [36266] "폭 6m이상".
+def c12():
+    import parcel
+    assert parcel.ROAD_W_REDEV == 6.0, parcel.ROAD_W_REDEV
+    assert parcel.ROAD_W_GENERAL == 4.0, parcel.ROAD_W_GENERAL
+    assert parcel.ROAD_MIN_W == parcel.ROAD_W_REDEV, "기본 판정이 재개발 기준이 아님"
+    p = parcel.Parcel("1" * 19, "1-1대", 100.0, 0.0, 0.0, "대", touch=5.0, touch4=5.0)
+    assert p.접도 is True and p.접도_일반 is True
+    좁은길 = parcel.Parcel("2" * 19, "2-2대", 100.0, 0.0, 0.0, "대", touch=0.0, touch4=5.0)
+    assert 좁은길.접도 is False, "6m 기준에서 걸러져야 함"
+    assert 좁은길.접도_일반 is True, "4m 기준으로는 접함"
+    미계산 = parcel.Parcel("3" * 19, "3-3대", 100.0, 0.0, 0.0, "대")
+    assert 미계산.접도 is None and 미계산.접도_일반 is None
+    return "재개발 6m / 주거환경개선 4m — 두 값을 따로 보관"
+
+
+case("⑫재개발 접도율의 도로 폭은 6m (조례 §6①2나)", c12)
+
+
+# ⑬ 조례 원문이 근거에 그대로 붙는다. 기억이 아니라 인용이어야 한다.
+def c13():
+    import law
+    if not os.path.exists(law.OUT):
+        raise SystemExit("law.json 없음 — python law.py --fetch")
+    호수 = law.cite("조례", "2", None, 5)
+    assert "1헥타르당 건축되어 있는 건축물의 동수" in 호수, 호수[:80]
+    과소 = law.cite("조례", "2", None, 9)
+    assert 과소.startswith('"과소필지"') and "90제곱미터 미만" in 과소, 과소
+    접도 = law.cite("조례", "6", 1, 2, "나")
+    assert "도로 폭은 6미터 이상" in 접도, 접도
+    assert law.label("조례", "6", 1, 2, "나") == "서울시 도시정비조례 §6①2호나목"
+    assert law.label("조례", "2", None, 5) == "서울시 도시정비조례 §2 제5호"
+    assert law.cite("조례", "999") == "", "없는 조를 지어내면 안 된다"
+    return "§2⑤ · §2⑨ · §6①2나 원문 인용 확인"
+
+
+case("⑬선택요건 근거는 조례 원문 인용", c13)
+
+
 passed = 0
 for name, fn in cases:
     try:

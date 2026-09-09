@@ -49,15 +49,36 @@ BAND_LO, BAND_HI = 1 / 1.115, 1 / 0.960          # ≈ 0.897 ~ 1.042
 BAND_SRC = "관악구 신림동 단일필지 9,664건 실측 90% 구간 (외필지 1+ 제외)"
 GWASO = 90.0          # 과소필지 기준 (서울 조례: 토지 90㎡ 미만)
 
-# 주택접도율 — 서울 조례: 폭 4m 이상 도로에 4m 이상 접한 건축물의 비율 (기준 40% 이하)
-ROAD_MIN_W = 4.0      # 도로 최소 폭 (m)
-TOUCH_MIN = 4.0       # 최소 접한 길이 (m)
+# 주택접도율 — 도로 폭 기준이 사업유형에 따라 다르다. 두 값을 다 계산해 둔다.
+#
+# 서울특별시 도시 및 주거환경정비 조례 제2조제10호 (일반 정의)
+#   "폭 4미터 이상 도로에 길이 4미터 이상 접한 대지의 건축물의 총수를
+#    정비구역 내 건축물 총수로 나눈 비율. 다만, 연장 35미터 이상의
+#    막다른 도로의 경우에는 폭 6미터로 한다."
+#
+# 같은 조례 제6조제1항제2호나목 (주택정비형 재개발 입안대상지역 요건)
+#   "주택접도율이 40퍼센트 이하인 지역
+#    (제2조제10호에도 불구하고 주택접도율의 도로 폭은 6미터 이상으로 한다)"
+#   → 2024.5.20 개정으로 들어온 단서. 관악구 고시문에서도 갈린다:
+#     2024-04-23 [35193] "폭 4m이상" / 2024-09-23 [36266]·10-02 [36327] "폭 6m이상".
+#   → 그래서 재개발 판정에는 6m 를 쓴다. 4m 는 주거환경개선구역(§6①1나) 몫.
+#
+# 제2조제10호 단서(막다른 도로)는 지적도만으로 '막다른' 여부와 연장을
+# 판정할 수 없어 미적용.
+ROAD_W_GENERAL = 4.0  # §2⑩ 일반 정의 — 주거환경개선구역
+ROAD_W_REDEV = 6.0    # §6①2나 — 주택정비형 재개발 (이 프로젝트의 기본)
+ROAD_MIN_W = ROAD_W_REDEV     # 기본 판정 기준
+TOUCH_MIN = 4.0       # 최소 접한 길이 (m) — 두 기준 공통
+DEADEND_LEN = 35.0    # §2⑩ 단서 — 연장 35m 이상 막다른 도로
+DEADEND_W = 6.0       # §2⑩ 단서 — 그 경우 요구 폭 (미적용)
 SNAP = 1.0            # 격자 해상도 (m) — 접한 길이를 이 단위로 센다
 SUB = 0.2             # 경계 샘플링 간격 (m). 격자보다 촘촘해야 맞닿은 선분을 안 놓친다
 JIMOK_ROAD = "도"     # 지적 지목 '도로'
 ROAD_NOTE = ("지목 '도' 기준 근사 — 사도·통행로 같은 **현황도로는 미반영**이라 "
              "실제 접도율보다 낮게(=요건에 유리하게) 나올 수 있다. "
-             "도로 폭은 폴리곤에서 2×면적/둘레로 추정한 값이다.")
+             "도로 폭은 폴리곤에서 2×면적/둘레로 추정한 값이다. "
+             "재개발 기준은 조례 §6①2나 의 폭 6m. §2⑩ 단서(연장 35m 이상 "
+             "막다른 도로)는 미적용.")
 
 
 @dataclass
@@ -68,7 +89,8 @@ class Parcel:
     x: float          # 중심점 — BASE(EPSG:2097) 로 변환해 저장, 구역과 같은 좌표계
     y: float
     jimok: str = ""   # 지목 한 글자 (대/도/천/임 …) — JIBUN 끝에서 파싱
-    touch: float = -1.0   # 폭 ROAD_MIN_W 이상 도로에 접한 길이(m). -1=미계산
+    touch: float = -1.0   # 폭 6m(§6①2나) 도로에 접한 길이(m). -1=미계산
+    touch4: float = -1.0  # 폭 4m(§2⑩) 기준 — 주거환경개선구역용
 
     @property
     def 도로(self) -> bool:
@@ -76,10 +98,18 @@ class Parcel:
 
     @property
     def 접도(self) -> Optional[bool]:
-        """조례 접도 조건(폭 4m 도로에 4m 이상 접함) 충족 여부. None=미계산."""
+        """주택정비형 재개발 접도 조건(§6①2나 — 폭 6m 도로에 4m 이상 접).
+        None=미계산."""
         if self.touch < 0:
             return None
         return self.touch >= TOUCH_MIN
+
+    @property
+    def 접도_일반(self) -> Optional[bool]:
+        """§2⑩ 일반 정의(폭 4m). 주거환경개선구역 판정용. None=미계산."""
+        if self.touch4 < 0:
+            return None
+        return self.touch4 >= TOUCH_MIN
 
     @property
     def bjd(self) -> str:
@@ -227,34 +257,43 @@ def build(src: str = RAW, out_dir: str = None) -> list[str]:
             keep.append((pnu, jibun, _jimok(jibun), g,
                          abs(sum(_shoelace(x_) for x_ in g))))
 
-        # ② 접도 — 폭 4m 이상 도로 필지의 경계를 격자에 찍고, 각 필지가 몇 m 접하는지
+        # ② 접도 — 기준 폭 이상인 도로 필지의 경계를 격자에 찍고, 각 필지가 몇 m
+        #    접하는지 센다. 재개발(6m)·주거환경개선(4m) 두 기준을 다 만든다.
         roads = [(pnu, g, a) for pnu, _, jm, g, a in keep if jm == JIMOK_ROAD]
         widths = _road_widths(roads)
-        wide = set()
-        for pnu, g, _a in roads:
-            if widths.get(pnu, 0) >= ROAD_MIN_W:
-                wide |= _sample(g)
-        touch = {}
-        for pnu, _jb, jm, g, _a in keep:
-            if jm == JIMOK_ROAD:
-                touch[pnu] = -1.0        # 도로 자신은 분모에서 뺀다
-                continue
-            hit = len(_sample(g) & wide)
-            touch[pnu] = round(max(0.0, (hit - 1) * SNAP), 1) if hit else 0.0
+        samples = {pnu: _sample(g) for pnu, g, _a in roads}
+
+        def _touch(minw):
+            wide = set()
+            for pnu, _g, _a in roads:
+                if widths.get(pnu, 0) >= minw:
+                    wide |= samples[pnu]
+            out = {}
+            for pnu, _jb, jm, g, _a in keep:
+                if jm == JIMOK_ROAD:
+                    out[pnu] = -1.0      # 도로 자신은 분모에서 뺀다
+                    continue
+                hit = len(_sample(g) & wide)
+                out[pnu] = round(max(0.0, (hit - 1) * SNAP), 1) if hit else 0.0
+            return out
+
+        touch = _touch(ROAD_W_REDEV)
+        touch4 = _touch(ROAD_W_GENERAL)
 
         rows = []
         for pnu, jibun, jm, g, area in keep:
             cx, cy = _centroid(g)
             x, y = geo.wgs84_to_tm(*geo.tm_to_wgs84(cx, cy, crs))   # → BASE(2097)
             rows.append([pnu, jibun, round(area, 1), round(x, 1), round(y, 1),
-                         jm, touch.get(pnu, -1.0)])
+                         jm, touch.get(pnu, -1.0), touch4.get(pnu, -1.0)])
         path = os.path.join(out_dir, f"parcels-{sgg}.json")
         os.makedirs(out_dir, exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
             json.dump({"출처": SRC_DOC, "원천": os.path.basename(shp),
                        "좌표계": "EPSG:2097(변환 저장)", "원본좌표계": crs.name,
                        "필지": len(rows), "도로필지": len(roads),
-                       "접도기준": {"도로폭": ROAD_MIN_W, "접한길이": TOUCH_MIN,
+                       "접도기준": {"도로폭": ROAD_W_REDEV, "도로폭_일반": ROAD_W_GENERAL,
+                                 "접한길이": TOUCH_MIN,
                                  "샘플간격": SNAP, "주의": ROAD_NOTE},
                        "rows": rows},
                       fh, ensure_ascii=False, separators=(",", ":"))
@@ -284,7 +323,8 @@ def load(sigungu: str = None) -> dict[str, Parcel]:
             pnu, jibun, area, x, y = row[:5]
             jm = row[5] if len(row) > 5 else _jimok(jibun)
             tc = row[6] if len(row) > 6 else -1.0
-            out[pnu] = Parcel(pnu, jibun, area, x, y, jm, tc)
+            t4 = row[7] if len(row) > 7 else -1.0
+            out[pnu] = Parcel(pnu, jibun, area, x, y, jm, tc, t4)
     _CACHE[key] = out
     return out
 

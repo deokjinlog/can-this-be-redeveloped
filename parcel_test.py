@@ -203,9 +203,11 @@ def c12():
     산 = r["신림1재정비촉진구역"]
     길 = r["신림7 주택정비형 재개발사업"]
     assert 산 is not None and 길 is not None, r
-    assert 산 < 0.20, 산
-    assert 길 > 0.50, 길
-    return f"신림1(산동네) {산:.1%} vs 신림7(큰길가) {길:.1%}"
+    # 기준은 조례 §6①2나 의 폭 6m. 절대값보다 '갈린다'가 이 케이스의 주장이다.
+    assert 산 < 0.10, 산
+    assert 길 > 0.40, 길
+    assert 길 - 산 > 0.30, (산, 길)
+    return f"신림1(산동네) {산:.1%} vs 신림7(큰길가) {길:.1%}  (폭 6m 기준)"
 
 
 @case("⑬건물이 없는 구역은 접도율을 내지 않는다 (조례 분모=건축물)")
@@ -236,17 +238,17 @@ def c13():
     return "42%(경계)→미발급 / 20%→발급"
 
 
-@case("⑮호수밀도는 정의가 미검증이라 Fact 를 주지 않는다")
+@case("⑮호수밀도는 값이 근사라 Fact 를 주지 않는다 (정의는 조례 §2⑤ 확정)")
 def c14():
     import aging
     bl = aging.load()
     z = geo.search("신림1재정비촉진구역")[0]
     ag = aging.aggregate_zone(bl, z, parcel.load("11620"))
     assert ag.호수밀도 and ag.호수밀도 > 60, ag.호수밀도
-    assert "호수밀도" not in aging.to_facts(ag), "미검증 정의로 Fact 를 발급함"
+    assert "호수밀도" not in aging.to_facts(ag), "근사값으로 Fact 를 발급함"
     a = aging.to_area(ag)
     assert a.호수밀도 is None
-    return f"{ag.호수밀도:,.0f}호/ha 계산은 하되 판정엔 안 씀"
+    return f"{ag.호수밀도:,.0f}동/ha 계산은 하되 판정엔 안 씀"
 
 
 passed = 0
