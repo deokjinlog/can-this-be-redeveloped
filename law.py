@@ -25,12 +25,19 @@ from typing import Optional
 ROOT = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(ROOT, "data", "law.json")
 API = "https://www.law.go.kr/DRF/lawService.do?OC=test&target=law&MST={}&type=XML"
+# 자치법규(조례)는 target=ordin. 응답 구조도 다르다 — 조문단위/항/호 대신
+# <조> 하나에 항·호가 통째로 들어 있어서, 조 본문에서 호를 직접 잘라 쓴다.
+API_ORDIN = "https://www.law.go.kr/DRF/lawService.do?OC=test&target=ordin&MST={}&type=XML"
 UA = {"User-Agent": "Mozilla/5.0 (can-this-be-redeveloped; personal non-commercial)"}
 
 TARGETS = {
     "법": ("284065", "도시 및 주거환경정비법"),
     "령": ("287285", "도시 및 주거환경정비법 시행령"),
 }
+# 선택요건(과소필지·접도율·호수밀도)의 정의와 기준은 전부 여기서 온다.
+# §2⑤ 호수밀도 = 1ha당 건축물 동수, §2⑨ 과소필지 = 90㎡ 미만,
+# §2⑩ 주택접도율, §6①2 주택정비형 재개발 입안대상지역 요건.
+ORDIN = {"조례": ("2130189", "서울특별시 도시 및 주거환경정비 조례")}
 
 
 def _sp(t: str) -> str:
@@ -64,11 +71,33 @@ def fetch(mst: str) -> dict:
     return out
 
 
+def fetch_ordin(mst: str) -> dict:
+    """자치법규 원문. <조> 하나에 항·호가 다 들어 있어 조 단위로만 쪼갠다."""
+    req = urllib.request.Request(API_ORDIN.format(mst), headers=UA)
+    with urllib.request.urlopen(req, timeout=60) as r:
+        root = ET.fromstring(r.read())
+    out = {"법령명": root.findtext(".//자치법규명"),
+           "시행일자": root.findtext(".//시행일자"),
+           "공포일자": root.findtext(".//공포일자"),
+           "공포번호": root.findtext(".//공포번호"),
+           "조문": {}}
+    for jo in root.findall(".//조"):
+        body = jo.findtext("조내용") or ""
+        m = re.match(r"\s*제(\d+)조(?:의(\d+))?", body)
+        if not m:
+            continue                      # 장·절 제목 줄
+        num = m.group(1) + (f"의{m.group(2)}" if m.group(2) else "")
+        out["조문"][num] = {"제목": _sp(jo.findtext("조제목")),
+                           "본문": _sp(body), "항": []}
+    return out
+
+
 def build(out_path: str = OUT) -> str:
     data = {"출처": "국가법령정보센터 OpenAPI (law.go.kr/DRF)", "법령": {}}
     for k, (mst, nm) in TARGETS.items():
-        d = fetch(mst)
-        data["법령"][k] = d
+        data["법령"][k] = fetch(mst)
+    for k, (mst, nm) in ORDIN.items():
+        data["법령"][k] = fetch_ordin(mst)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, ensure_ascii=False, separators=(",", ":"))
@@ -93,11 +122,20 @@ def article(which: str, num: str) -> Optional[dict]:
     return load()["법령"].get(which, {}).get("조문", {}).get(num)
 
 
-def cite(which: str, num: str, 항: int = None, 호: int = None) -> str:
-    """판정 근거에 붙일 **원문 인용**. 조·항·호를 정확히 짚는다."""
+_HO = "가나다라마바사아자차"
+
+
+def cite(which: str, num: str, 항: int = None, 호: int = None,
+         목: str = None) -> str:
+    """판정 근거에 붙일 **원문 인용**. 조·항·호를 정확히 짚는다.
+
+    조례는 항·호가 조 본문에 통째로 들어 있어 정규식으로 잘라 쓴다.
+    """
     a = article(which, num)
     if not a:
         return ""
+    if which == "조례":
+        return _slice_ordin(a["본문"], 항, 호, 목)
     if 항 is None:
         return a["본문"]
     try:
@@ -112,13 +150,46 @@ def cite(which: str, num: str, 항: int = None, 호: int = None) -> str:
         return ""
 
 
-def label(which: str, num: str, 항: int = None, 호: int = None) -> str:
-    nm = "도시정비법" if which == "법" else "시행령"
+def _slice_ordin(body: str, 항: int = None, 호: int = None,
+                 목: str = None) -> str:
+    """조례 조 본문 → 해당 항/호/목만. 못 찾으면 빈 문자열(=근거 없음)."""
+    t = body
+    if 항:
+        mark = "①②③④⑤⑥⑦⑧⑨⑩"[항 - 1]
+        i = t.find(mark)
+        if i < 0:
+            return ""
+        nxt = t.find("①②③④⑤⑥⑦⑧⑨⑩"[항], i) if 항 < 10 else -1
+        t = t[i:nxt if nxt > 0 else len(t)]
+    if 호:
+        m = re.search(rf"(?:^|\s){호}\.\s(.+?)(?=\s{호 + 1}\.\s|$)", t)
+        if not m:
+            return ""
+        t = m.group(1)
+    if 목:
+        m = re.search(rf"(?:^|\s){목}\.\s(.+?)(?=\s{_next_mok(목)}\.\s|$)", t)
+        if not m:
+            return ""
+        t = m.group(1)
+    return _sp(t)
+
+
+def _next_mok(목: str) -> str:
+    i = _HO.find(목)
+    return _HO[i + 1] if 0 <= i < len(_HO) - 1 else "\uffff"
+
+
+def label(which: str, num: str, 항: int = None, 호: int = None,
+          목: str = None) -> str:
+    nm = {"법": "도시정비법", "령": "시행령",
+          "조례": "서울시 도시정비조례"}.get(which, which)
     s = f"{nm} §{num}"
     if 항:
-        s += "①②③④⑤⑥⑦⑧⑨"[항 - 1]
+        s += "①②③④⑤⑥⑦⑧⑨⑩"[항 - 1]
     if 호:
-        s += f"{호}호"
+        s += f"{호}호" if 항 else f" 제{호}호"   # 항이 없으면 §25호 로 붙어 모호해진다
+    if 목:
+        s += f"{목}목"
     return s
 
 
