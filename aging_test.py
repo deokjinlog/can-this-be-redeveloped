@@ -237,6 +237,36 @@ def c14():
 case("⑭영 별표1 은 조문이 아니라 별표에 있다", c14)
 
 
+# ⑮ 반지하는 '지하층이 있다' 가 아니라 '지하층을 주거로 쓴다' 다.
+#    표제부 지하층수로 세면 관악 79.7% 가 반지하가 된다 — 대부분 주차장인데.
+#    층별 실제 용도는 기타용도(etcPurps)에 있고, 주용도는 건물 전체 값이라 못 쓴다.
+def c15():
+    import floors
+    assert floors.classify("주차장") is False
+    assert floors.classify("다가구주택(2가구)") is True
+    assert floors.classify("연립주택(3세대)") is True
+    assert floors.classify("") is None, "빈 용도를 판정하면 안 된다"
+    assert floors.classify("무슨무슨실") is None, "처음 보는 용도어는 미상"
+    # 요건이 '전부 또는 일부' 라 둘이 섞이면 주거가 이긴다
+    assert floors.classify("다가구주택, 주차장") is True
+
+    def R(gb, use):
+        return {"flrGbCdNm": gb, "etcPurps": use}
+    assert floors.verdict_of([R("지상", "단독주택")]) == "비주거"      # 지하층 없음
+    assert floors.verdict_of([R("지하", "주차장"), R("지상", "단독주택")]) == "비주거"
+    assert floors.verdict_of([R("지하", "주차장"), R("지하", "다가구주택")]) == "주거"
+    assert floors.verdict_of([R("지하", "")]) == "미상"
+
+    # 미상은 주거로도 비주거로도 세지 않는다 → 구간
+    cache = {"동": {"1": "주거", "2": "비주거", "3": "미상"}}
+    주거, 판정, 미상 = floors.tally(cache, ["1", "2", "3", "4"])
+    assert (주거, 판정, 미상) == (1, 2, 2), (주거, 판정, 미상)   # "4"=캐시에 없음
+    return "주거/비주거/미상 3분 · '일부라도 주거' 규칙 · 미상 반올림 없음"
+
+
+case("⑮반지하는 지하층 유무가 아니라 지하층 용도다", c15)
+
+
 passed = 0
 for name, fn in cases:
     try:

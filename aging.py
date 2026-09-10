@@ -236,6 +236,9 @@ class Aging:
     zone_area: float = 0.0               # 고시면적 (구역 단위일 때)
     범위밖: bool = False                  # 구역이 가진 표제부 CSV 의 법정동 밖에 있다
     호수: int = 0                        # 조례 §2⑤ 건축물 동수 (호수밀도 분자)
+    동목록: list = field(default_factory=list)   # 구역 집계일 때만 [pk, pnu] — 층별개요 조인용
+    반지하: int = 0                      # 지하층 일부라도 주거용 (영 별표1 제2호아목)
+    반지하미상: int = 0                  # 층별개요를 아직 안 받았거나 용도가 빈 동
 
     @property
     def 접도율(self) -> Optional[float]:
@@ -243,6 +246,14 @@ class Aging:
         if not j or not j.접도분모:
             return None
         return j.접도충족 / j.접도분모
+
+    @property
+    def 반지하비율(self) -> Optional[tuple[float, float]]:
+        """(하한, 상한). 미상은 주거로도 비주거로도 세지 않는다."""
+        if not self.total:
+            return None
+        return (self.반지하 / self.total,
+                (self.반지하 + self.반지하미상) / self.total)
 
     @property
     def 호수밀도(self) -> Optional[float]:
@@ -376,6 +387,7 @@ def aggregate_zone(bldgs: list[Bldg], zone, parcels=None, 기준: str = "표준3
         if b.부속 and not include_부속:
             continue
         ag.total += 1
+        ag.동목록.append([b.pk, b.pnu])
         ag.세대수합 += max(b.세대수, 0)
         ag.호수 += 동수(b)
         t = touch.get(b.pnu)
@@ -401,6 +413,15 @@ def aggregate_zone(bldgs: list[Bldg], zone, parcels=None, 기준: str = "표준3
         ag.by_decade[dec] = ag.by_decade.get(dec, 0) + 1
         st = b.구조 or "미상"
         ag.by_struct[st] = ag.by_struct.get(st, 0) + 1
+    # 반지하(영 별표1 제2호아목) — 층별개요 캐시가 있으면 채운다. 없으면 전부 미상.
+    # 표제부의 '지하층수' 로는 알 수 없다(관악 79.7% 가 지하층 보유, 대부분 주차장).
+    try:
+        import floors
+        cache = floors.load(zone.sigungu if zone.sigungu != "11000" else "11620")
+        ag.반지하, _판정, ag.반지하미상 = floors.tally(
+            cache, [pk for pk, _pnu in ag.동목록])
+    except Exception:
+        ag.반지하미상 = ag.total
     return ag
 
 
@@ -465,6 +486,14 @@ def cross_check(ag: Aging, site) -> Optional[tuple[bool, str]]:
 
 # ── criteria_engine 연결 ──
 
+def floors_src() -> str:
+    try:
+        import floors
+        return floors.SRC_DOC
+    except Exception:
+        return "건축물대장 층별개요"
+
+
 def _조례(조: str, 항=None, 호=None, 목=None) -> str:
     """근거 문구 끝에 붙일 조례 원문. 캐시가 없으면 조용히 생략한다."""
     try:
@@ -478,7 +507,7 @@ def _조례(조: str, 항=None, 호=None, 목=None) -> str:
 def to_facts(ag: Aging) -> dict:
     """집계 → Fact. 구간이 확정될 때만 Fact 를 주고, 걸치면 None(=확인필요)."""
     out = {"노후불량비율": None, "노후연면적비율": None, "과소필지비율": None,
-           "접도율": None}
+           "접도율": None, "반지하비율": None}
     span = (f"{ag.label} 주건축물 {ag.total}동 중 노후 {ag.old}동"
             f"{f' · 준공일 미상 {ag.unknown}동' if ag.unknown else ''} "
             f"(경과연수 기준 {ag.기준})")
@@ -516,6 +545,17 @@ def to_facts(ag: Aging) -> dict:
                 f"{PARCEL.TOUCH_MIN:.0f}m 이상 접한 것 {j.접도충족:,}동 "
                 f"(구역 안 도로필지 {j.도로필지}) · {PARCEL.ROAD_NOTE}"
                 + _조례("6", 1, 2, "나"))
+    # 반지하(영 별표1 제2호아목) — 층별개요를 받은 만큼만. 미상을 주거로도 비주거로도
+    # 세지 않으므로 [하한, 상한] 이고, 구간이 50% 를 걸치면 발급하지 않는다.
+    bj = ag.반지하비율
+    if bj is not None and ag.total >= 10:
+        blo, bhi = bj
+        need = Cfg.BANJIHA_RATIO
+        if blo >= need or bhi < need:
+            out["반지하비율"] = Fact(
+                blo, Grade.P1, floors_src(),
+                f"{ag.label} 건물 {ag.total:,}동 중 지하층 일부라도 주거용 {ag.반지하:,}동"
+                + (f" · 층별개요 미조회·용도 미상 {ag.반지하미상:,}동" if ag.반지하미상 else ""))
     # 호수밀도는 일부러 뺀다. 정의는 조례 §2⑤ 로 확정됐지만(2026-09 확인), 표제부에
     # 층별 세대분포·건축면적·무허가건축물이 없어 분자가 근사다. 근사값이 60/ha 를
     # 넘겼다고 선택요건을 MET 로 올리면 '틀리느니 비운다'를 어긴다. 화면에는 보여준다.
@@ -545,6 +585,7 @@ def to_area(ag: Aging, 면적: Optional[float] = None, 촉진: bool = False,
         노후연면적비율=f["노후연면적비율"],
         과소필지비율=f["과소필지비율"],
         접도율=f["접도율"],
+        반지하비율=f["반지하비율"],
         노후도_대리지표=proxy,
     )
 
@@ -584,8 +625,16 @@ def render_aging(ag: Aging, detail: bool = True) -> str:
             L.append(f"  · 주택접도율 {ag.접도율:.1%}   (선택요건 기준 {Cfg.JEOPDO_MAX:.0%} 이하)"
                      f"  [{j.접도충족:,}/{j.접도분모:,}동, 구역 안 도로 {j.도로필지}필지]")
             L.append(f"      └ 지목 '도' 기준 근사 — 현황도로(사도·통행로) 미반영")
+        if ag.반지하비율 is not None and (ag.반지하 or ag.반지하미상 < ag.total):
+            blo, bhi = ag.반지하비율
+            rng = f"{blo:.1%}" if not ag.반지하미상 else f"{blo:.1%} ~ {bhi:.1%}"
+            L.append(f"  · 반지하 {rng}   (선택요건 기준 {Cfg.BANJIHA_RATIO:.0%} 이상)"
+                     f"  [{ag.반지하:,}/{ag.total:,}동"
+                     + (f", 미상 {ag.반지하미상:,}" if ag.반지하미상 else "") + "]")
+            L.append("      └ 영 별표1 제2호아목 — 지하층 일부라도 주거용이면 해당"
+                     " (건축물대장 층별개요)")
         if ag.호수밀도 is not None:
-            L.append(f"  · 호수밀도 {ag.호수밀도:,.0f}호/ha   (선택요건 기준 {Cfg.HOSU_DENSITY}호 이상)"
+            L.append(f"  · 호수밀도 {ag.호수밀도:,.0f}동/ha   (선택요건 기준 {Cfg.HOSU_DENSITY}동 이상)"
                      f"  [{ag.호수:,}동 / {ag.zone_area/10000:.2f}ha]")
             L.append("      └ 조례 §2⑤ 동수 산정 — 층별 세대분포·건축면적이 없어 근사"
                      "(무허가·존치공원 미반영)")
