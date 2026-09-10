@@ -10,7 +10,9 @@ can-this-be-redeveloped / 요건 모듈 (A) — "이 지역·집이 재개발 �
 설계 규율은 succession 과 동일: 4값(MET/NOT_MET/INSUFFICIENT/CONFLICT),
 근거등급(P0>P1>S1>T), 미검증 기준은 추측 금지→확인필요, source_span, 확인필요 반올림 금지.
 
-수치 출처: 서울시 정비사업 정보몽땅(cleanup.seoul.go.kr) + 서울특별시 도시정비조례 별표1.
+수치 출처: 도시정비법 시행령 별표1 제2호(정비계획의 입안대상지역) + 서울특별시
+도시정비조례 제6조제1항제2호·제2조. 조례 '별표1' 은 공동주택 노후기간표라 요건표가
+아니다 — 한동안 이걸 요건 출처로 적어놨었다.
 """
 
 from dataclasses import dataclass, field
@@ -40,7 +42,7 @@ class Cfg:
     OLD_YEARS_ETC = 30
     OLD_YEARS_SRC = "도정법 §2·시행령 §2 / 시·도 조례(20~30년, RC 공동주택 30년)"
 
-    # 주택정비형 재개발 지정요건 (서울 조례 별표1 / 정보몽땅 — 검증됨)
+    # 주택정비형 재개발 지정요건 (영 별표1 제2호 + 조례 §6①2 — 원문 대조 검증됨)
     REDEV_RATIO = 0.60           # [필수] 노후·불량건축물 동수 비율 ≥ 60%
     REDEV_RATIO_PROMO = 0.50     #        재정비촉진지구 50%
     MIN_AREA = 10_000            # [필수] 구역 면적 ≥ 1만㎡ (심의 인정 시 5천㎡ 완화)
@@ -50,7 +52,20 @@ class Cfg:
     JEOPDO_MAX = 0.40            # 주택접도율 ≤ 40%  (조례 §2⑩ — 폭4m 도로에 4m 접)
     HOSU_DENSITY = 60            # 호수밀도 ≥ 60/ha  (조례 §2⑤ — 1ha당 건축물 동수)
     NOHU_AREA_RATIO = 0.60       # 노후·불량건축물 연면적 ≥ 60%
-    SRC = "서울시 도시정비조례 별표1 / 정비사업 정보몽땅(주택정비형 재개발 지정요건)"
+    BANJIHA_RATIO = 0.50         # 반지하 ≥ 1/2   (영 별표1 제2호아목)
+    # 서울시 운영기준 — 노후 동수가 이 선을 넘으면 선택요건을 갖춘 것으로 본다.
+    # 조례 조문이 아니라 기관 게시(S1): 관악구 고시 후보지모집안내문(2024-10-02)
+    #   "※ 노후동수 75%이상인 경우 : 시 조례(선택요건) 갖춘 것으로 봄
+    #      (선택요건 미충족시에도 입안가능)"
+    NOHU_WAIVER = 0.75
+    NOHU_WAIVER_SRC = "서울시 운영기준 — 관악구 고시 후보지모집안내문(2024-10-02)"
+    # 영 별표1 제2호는 목이 가~자 9개다. 우리가 값으로 재는 건 그중 일부라,
+    # 재본 것이 다 미달이어도 '요건 미달'을 선언할 수 없다.
+    SELECT_UNMODELED = ("다목 인구·산업 과도집중", "라목 최저고도지구",
+                        "마목 공해 공업지역", "바목 역세권 고도이용",
+                        "사목 방재지구 1/2 이상", "자목 제1호라·마목")
+    SRC = ("도시정비법 시행령 별표1 제2호 + 서울시 도시정비조례 §6①2·§2 "
+           "(주택정비형 재개발 지정요건)")
 
 
 @dataclass
@@ -81,6 +96,8 @@ class Area:          # 정비구역 (지정 핵심)
     접도율: Optional[Fact] = None        # 0~1 [선택] 낮을수록 열악
     호수밀도: Optional[Fact] = None      # ha당 건축물 동수 (조례 §2⑤) [선택]
     노후연면적비율: Optional[Fact] = None # 0~1 [선택]
+    반지하비율: Optional[Fact] = None    # 0~1 [선택] 영 별표1 제2호아목
+                                        # 표제부엔 지하층 '용도'가 없어 보통 None
     # 노후도를 잰 단위가 '정비구역 경계'가 아니라 법정동·도로·지번블록인 경우.
     # 값 자체는 전수 실측이지만 측정 대상이 요건의 그것과 달라 결론을 확정하지 않는다.
     노후도_대리지표: bool = False
@@ -112,7 +129,7 @@ def _from_fact(name, fact, thr, op, unit, miss, kind):
     if unit == "pct":
         vs = f"{val:.0%} {op} 기준 {thr:.0%}"
     elif unit == "num":
-        vs = f"{val:.0f}호 {op} 기준 {thr:.0f}호"
+        vs = f"{val:.0f}동 {op} 기준 {thr:.0f}동"
     else:
         vs = f"{val:,.0f}㎡ {op} 기준 {thr:,.0f}㎡"
     return Req(name, V.MET if ok else V.NOT_MET, value=vs + (" ✓" if ok else " ✗"),
@@ -170,6 +187,8 @@ def _selects(a: Area) -> list[Req]:
         ("주택접도율", a.접도율, Cfg.JEOPDO_MAX, "<=", "pct", "정비계획 자료(주택접도율)"),
         ("호수밀도(ha당)", a.호수밀도, Cfg.HOSU_DENSITY, ">=", "num", "정비계획 자료(호수밀도)"),
         ("노후 연면적 비율", a.노후연면적비율, Cfg.NOHU_AREA_RATIO, ">=", "pct", "정비계획 자료(노후 연면적)"),
+        ("반지하 비율", a.반지하비율, Cfg.BANJIHA_RATIO, ">=", "pct",
+         "건축물대장 층별개요(지하층 용도) — 표제부엔 없음"),
     ]
     return [_from_fact(n, f, t, o, u, m, "선택") for n, f, t, o, u, m in specs]
 
@@ -254,14 +273,32 @@ def evaluate(b: Building, a: Area) -> Report:
                 "→ 충족/미달을 확정하지 않는다. 경계가 정해지면 그 안에서 다시 세면 확정된다.")
     else:  # 필수 둘 다 MET → 선택요건 1개 이상
         sv = [_eff(s) for s in selects]
+        면제 = (a.노후불량비율 is not None and not ratio.provisional
+              and a.노후불량비율.value >= Cfg.NOHU_WAIVER)
         if V.MET in sv:
             overall = _OA["가능"]
+        elif 면제:
+            # 노후 동수가 75% 를 넘으면 서울시가 선택요건을 갖춘 것으로 본다.
+            # 조문이 아니라 기관 게시(S1)라 근거를 그대로 밝힌다.
+            overall = _OA["가능"]
+            notes.append(
+                f"선택요건을 값으로 넘긴 건 없지만 노후 동수 "
+                f"{a.노후불량비율.value:.0%} ≥ {Cfg.NOHU_WAIVER:.0%} → 선택요건을 갖춘 "
+                f"것으로 본다. 근거등급 S1(기관 게시, 조례 조문 아님): "
+                f"{Cfg.NOHU_WAIVER_SRC}")
         elif V.INSUFFICIENT in sv:
             overall = _OA["확인"]
-            notes.append("필수는 충족. 선택요건(과소필지·접도율·호수밀도·노후연면적) 자료 보완 필요.")
+            notes.append("필수는 충족. 선택요건(과소필지·접도율·호수밀도·노후연면적·반지하) "
+                         "자료 보완 필요.")
         else:
-            overall = _OA["미달"]
-            notes.append("노후도·면적은 충족하나 선택요건 4종을 하나도 못 넘김.")
+            # 재본 선택요건이 다 미달이어도 '미달'이 아니다 — 영 별표1 제2호의
+            # 나머지 목(방재지구·최저고도지구 등)은 우리가 재지 않는다.
+            overall = _OA["확인"]
+            notes.append(
+                "노후도·면적은 충족. 우리가 값으로 재는 선택요건(과소필지·접도율·"
+                "호수밀도·노후연면적)은 모두 미달이지만, 영 별표1 제2호는 목이 "
+                "가~자 9개다. 안 재는 목이 남아 있어 '미달'로 확정하지 않는다 — "
+                + " / ".join(Cfg.SELECT_UNMODELED))
     notes.append(f"※ 기준=서울 조례. 타 지자체는 조례 상이. 출처: {Cfg.SRC}")
     return Report(reqs, overall, notes=notes,
                   scope=f"{a.사업유형} '될 수 있나'(정비구역 지정 요건) 판정"

@@ -15,6 +15,7 @@ law.py — 법령 원문 수집·인용 (국가법령정보센터 OpenAPI)
 """
 
 import argparse
+import html
 import json
 import os
 import re
@@ -44,6 +45,24 @@ def _sp(t: str) -> str:
     return re.sub(r"\s+", " ", (t or "").strip())
 
 
+def _annexes(root) -> dict:
+    """별표 — 정비계획 입안대상지역 요건(영 별표1)이 여기 있다. 조문만 받으면
+    엔진의 핵심 근거가 통째로 빠진다. 본문은 HTML 이라 태그를 걷어낸다."""
+    out = {}
+    for x in root.findall(".//별표단위"):
+        num = (x.findtext("별표번호") or "").strip().lstrip("0") or "0"
+        가지 = (x.findtext("별표가지번호") or "").strip().lstrip("0")
+        key = f"{num}의{가지}" if 가지 else num
+        raw = html.unescape(x.findtext("별표내용") or "")
+        if not raw.strip():
+            continue                      # 첨부파일만 있는 별표(조례가 대부분)
+        t = re.sub(r"<[^>]+>", "\n", raw)
+        t = re.sub(r"[ \t\xa0]+", " ", t)
+        t = "\n".join(l.strip() for l in t.split("\n") if l.strip())
+        out.setdefault(key, {"제목": _sp(x.findtext("별표제목")), "본문": t})
+    return out
+
+
 def fetch(mst: str) -> dict:
     req = urllib.request.Request(API.format(mst), headers=UA)
     with urllib.request.urlopen(req, timeout=60) as r:
@@ -52,7 +71,7 @@ def fetch(mst: str) -> dict:
            "시행일자": root.findtext(".//시행일자"),
            "공포일자": root.findtext(".//공포일자"),
            "공포번호": root.findtext(".//공포번호"),
-           "조문": {}}
+           "조문": {}, "별표": _annexes(root)}
     for u in root.findall(".//조문단위"):
         num = (u.findtext("조문번호") or "").strip()
         if not num:
@@ -80,7 +99,7 @@ def fetch_ordin(mst: str) -> dict:
            "시행일자": root.findtext(".//시행일자"),
            "공포일자": root.findtext(".//공포일자"),
            "공포번호": root.findtext(".//공포번호"),
-           "조문": {}}
+           "조문": {}, "별표": _annexes(root)}
     for jo in root.findall(".//조"):
         body = jo.findtext("조내용") or ""
         m = re.match(r"\s*제(\d+)조(?:의(\d+))?", body)
@@ -101,8 +120,10 @@ def build(out_path: str = OUT) -> str:
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, ensure_ascii=False, separators=(",", ":"))
-    return " · ".join(f"{v['법령명']}({v['시행일자']} 시행, 조문 {len(v['조문'])})"
-                      for v in data["법령"].values())
+    return " · ".join(
+        f"{v['법령명']}({v['시행일자']} 시행, 조문 {len(v['조문'])}"
+        + (f", 별표 {len(v['별표'])}" if v.get("별표") else "") + ")"
+        for v in data["법령"].values())
 
 
 _CACHE = None
@@ -123,6 +144,41 @@ def article(which: str, num: str) -> Optional[dict]:
 
 
 _HO = "가나다라마바사아자차"
+
+
+def annex(which: str, num: str = "1") -> Optional[dict]:
+    """별표 한 장. which: '법' | '령' | '조례'."""
+    return load()["법령"].get(which, {}).get("별표", {}).get(num)
+
+
+def cite_annex(which: str, num: str = "1", 호: int = None,
+               목: str = None) -> str:
+    """별표에서 호·목만 잘라 인용. 영 별표1 제2호아목처럼 짚는다."""
+    a = annex(which, num)
+    if not a:
+        return ""
+    t = a["본문"]
+    if 호:
+        m = re.search(rf"(?:^|\n){호}\.\s(.+?)(?=\n{호 + 1}\.\s|$)", t, re.S)
+        if not m:
+            return ""
+        t = m.group(1)
+    if 목:
+        m = re.search(rf"(?:^|\n){목}\.\s(.+?)(?=\n{_next_mok(목)}\.\s|$)", t, re.S)
+        if not m:
+            return ""
+        t = m.group(1)
+    return _sp(t)
+
+
+def label_annex(which: str, num: str = "1", 호: int = None, 목: str = None) -> str:
+    nm = {"법": "도시정비법", "령": "시행령", "조례": "서울시 도시정비조례"}.get(which, which)
+    s = f"{nm} 별표{num}"
+    if 호:
+        s += f" 제{호}호"
+    if 목:
+        s += f"{목}목"
+    return s
 
 
 def cite(which: str, num: str, 항: int = None, 호: int = None,

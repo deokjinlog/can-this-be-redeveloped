@@ -215,6 +215,28 @@ def c13():
 case("⑬선택요건 근거는 조례 원문 인용", c13)
 
 
+# ⑭ 영 별표1 이 없으면 엔진의 근거가 통째로 빈다 — 조문만 받으면 놓친다.
+#    선택요건의 목은 가~자 9개이고, 우리가 값으로 재는 건 그중 일부다.
+def c14():
+    import law, re
+    if not os.path.exists(law.OUT):
+        raise SystemExit("law.json 없음 — python law.py --fetch")
+    a = law.annex("령", "1")
+    assert a and "정비계획의 입안대상지역" in a["제목"], a and a["제목"]
+    반지하 = law.cite_annex("령", "1", 2, "아")
+    assert "지하층" in 반지하 and "2분의 1 이상" in 반지하, 반지하
+    방재 = law.cite_annex("령", "1", 2, "사")
+    assert "방재지구" in 방재, 방재
+    목 = sorted(set(re.findall(r"(?:^|\s)([가-자])\.\s", law.cite_annex("령", "1", 2))))
+    assert 목 == list("가나다라마바사아자"), 목
+    assert law.label_annex("령", "1", 2, "아") == "시행령 별표1 제2호아목"
+    assert law.cite_annex("령", "1", 99) == "", "없는 호를 지어내면 안 된다"
+    return f"별표1 제2호 목 {len(목)}개(가~자) · 아목=반지하 · 사목=방재지구"
+
+
+case("⑭영 별표1 은 조문이 아니라 별표에 있다", c14)
+
+
 passed = 0
 for name, fn in cases:
     try:
