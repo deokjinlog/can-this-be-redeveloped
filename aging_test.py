@@ -2,23 +2,23 @@
 import os
 from datetime import date
 
-from aging import (Aging, Bldg, THRESHOLDS, aggregate, default_csv, load,
-                   to_facts, render_aging)
+from aging import (Aging, Bldg, DEFAULT_THR, THRESHOLDS, aggregate, default_csv,
+                   load, to_facts, render_aging)
 from criteria_engine import Cfg, Grade
 
 BASE = date(2026, 9, 1)
 
 
 def B(연도, 구조="철근콘크리트구조", 지번="1-1", 연면적=100.0, 대지면적=200.0,
-      부속=False, 도로="R1", 본번="1", pnu=""):
+      부속=False, 도로="R1", 본번="1", pnu="", 용도="단독주택", 층=2):
     return Bldg(pk=f"{지번}/{연도}/{id(구조)}",
                 pnu=pnu or f"11620102001{본번.zfill(4)}{지번.split('-')[-1].zfill(4)}",
                 지번=지번, 본번=본번, 도로코드=도로,
-                도로명="테스트길", 용도="단독주택", 구조=구조, 준공연도=연도,
-                연면적=연면적, 대지면적=대지면적, 세대수=0, 가구수=0, 지상층수=2, 부속=부속)
+                도로명="테스트길", 용도=용도, 구조=구조, 준공연도=연도,
+                연면적=연면적, 대지면적=대지면적, 세대수=0, 가구수=0, 지상층수=층, 부속=부속)
 
 
-def one(bldgs, unit="dong", 기준="표준30"):
+def one(bldgs, unit="dong", 기준=DEFAULT_THR):
     return aggregate(bldgs, unit, 기준, base=BASE)["ALL" if unit == "dong" else "R1"]
 
 
@@ -79,7 +79,7 @@ def c5():
     bs = [B(1990)] * 3 + [B(2020, 부속=True)] * 5
     ag = one(bs)
     assert ag.total == 3, ag.total
-    inc = aggregate(bs, "dong", "표준30", base=BASE, include_부속=True)["ALL"]
+    inc = aggregate(bs, "dong", DEFAULT_THR, base=BASE, include_부속=True)["ALL"]
     assert inc.total == 8
     return f"주건축물만 {ag.total}동 (부속 포함 시 {inc.total}동)"
 
@@ -120,25 +120,39 @@ def c8():
 case("⑧연면적 분모는 실측만", c8)
 
 
-# ⑨ 기준셋: 구조혼합에서 조적조 25년은 노후, RC 25년은 양호
+# ⑨ 노후 기준은 일괄 30년이 아니라 조례 §4① 의 4갈래다.
+#    특히 단독주택은 제2호가목이 명시로 제외해서 철근콘크리트여도 20년이다.
 def c9():
-    bs = [B(2001, "벽돌구조"), B(2001, "철근콘크리트구조")]
-    std = one(bs, 기준="표준30")
-    mix = one(bs, 기준="구조혼합")
-    assert std.old == 0 and mix.old == 1, (std.old, mix.old)
-    assert THRESHOLDS["표준30"][1] is True and THRESHOLDS["구조혼합"][1] is False
-    return f"표준30 노후 {std.old}동 / 구조혼합 노후 {mix.old}동 (미검증 표시됨)"
+    from aging import _thr_jorye as T
+    assert T(B(2000, "철근콘크리트구조", 용도="단독주택")) == 20, "단독주택은 §4①2가 제외"
+    assert T(B(2000, "철근콘크리트구조", 용도="제2종근린생활시설")) == 30   # §4①2가
+    assert T(B(2000, "벽돌구조", 용도="제2종근린생활시설")) == 20           # §4①2나
+    assert T(B(2000, "벽돌구조", 용도="공동주택")) == 20                    # §4①1나
+    # §4①1가 + 별표1 — 준공연도 × 층수
+    assert T(B(1980, "철근콘크리트구조", 용도="공동주택", 층=5)) == 20
+    assert T(B(1985, "철근콘크리트구조", 용도="공동주택", 층=5)) == 28
+    assert T(B(1985, "철근콘크리트구조", 용도="공동주택", 층=4)) == 24
+    assert T(B(1986, "철근콘크리트구조", 용도="공동주택", 층=5)) == 30
+    assert T(B(1990, "철근콘크리트구조", 용도="공동주택", 층=4)) == 29
+    assert T(B(1995, "철근콘크리트구조", 용도="공동주택", 층=4)) == 30
+
+    # 옛 '일괄 30년' 과 실제로 갈린다: RC 단독주택 25년 → 조례는 노후, 일괄30은 양호
+    bs = [B(2001, "철근콘크리트구조", 용도="단독주택")]
+    assert one(bs, 기준="조례").old == 1
+    assert one(bs, 기준="일괄30").old == 0
+    assert THRESHOLDS["조례"][1] is True and THRESHOLDS["일괄30"][1] is False
+    return "§4① 4갈래 + 별표1(20~30년) · 단독주택은 RC여도 20년"
 
 
-case("⑨구조별 기준 감도", c9)
+case("⑨노후 기준은 일괄 30년이 아니라 조례 §4① 4갈래", c9)
 
 
 # ⑩ 집계 단위 분리 (도로 vs 지번블록)
 def c10():
     bs = [B(1990, 도로="R1", 본번="10"), B(2020, 도로="R2", 본번="10"),
           B(1990, 도로="R2", 본번="20")]
-    road = aggregate(bs, "road", "표준30", base=BASE)
-    bun = aggregate(bs, "bun", "표준30", base=BASE)
+    road = aggregate(bs, "road", DEFAULT_THR, base=BASE)
+    bun = aggregate(bs, "bun", DEFAULT_THR, base=BASE)
     assert set(road) == {"R1", "R2"} and road["R2"].total == 2
     assert set(bun) == {"10", "20"} and bun["10"].total == 2
     return f"도로 {len(road)}개 / 지번블록 {len(bun)}개"
@@ -282,7 +296,7 @@ print(f"\n{passed}/{len(cases)} 통과\n")
 csv_path = default_csv()
 if csv_path:
     bl = load(csv_path)
-    ag = aggregate(bl, "dong", "표준30")["ALL"]
+    ag = aggregate(bl, "dong", DEFAULT_THR)["ALL"]
     print("=" * 60)
     print(f"실 CSV 스모크 — {os.path.basename(csv_path)} ({len(bl):,}행)")
     print("=" * 60)

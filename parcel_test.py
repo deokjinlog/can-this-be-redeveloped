@@ -227,7 +227,7 @@ def c13b():
 def c13():
     import aging
     from criteria_engine import Cfg
-    ag = aging.Aging("정비구역", "t", "테스트", "표준30", True)
+    ag = aging.Aging("정비구역", "t", "테스트", "조례", True)
     ag.zone_area = 20000
     ag.jijeok = aging.Jijeok(100, 20000.0, 0, 0, 0, 1.0, 도로필지=10,
                              접도분모=100, 접도충족=42)      # 42% — 기준 40% 에 근접

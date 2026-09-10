@@ -38,31 +38,81 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC_DOC = "건축물대장 표제부 전수(건축HUB 공개 CSV)"
 
 # ── 경과연수 기준셋 ──
-#  '표준30' 만 검증됨(현 Cfg.OLD_YEARS_*). 나머지는 조례 범위 안의 미검증 변형 → 감도용.
-RC_KEYS = ("철근콘크리트", "철골", "강구조", "프리캐스트")
+#
+# 서울특별시 도시 및 주거환경정비 조례 제4조제1항 (영 §2③1 위임)
+#   1. 공동주택
+#      가. 철근콘크리트ㆍ철골콘크리트ㆍ철골철근콘크리트 및 강구조인 공동주택:
+#          별표 1에 따른 기간
+#      나. 가목 이외의 공동주택: 20년
+#   2. 공동주택 이외의 건축물
+#      가. 철근콘크리트ㆍ철골콘크리트ㆍ철골철근콘크리트 및 강구조 건축물
+#          (「건축법 시행령」 별표 1 제1호에 따른 **단독주택을 제외한다**): 30년
+#      나. 가목 이외의 건축물: 20년
+#
+# 한동안 '일괄 30년' 을 검증됨으로 달아놨는데 조문 어디에도 그런 기준은 없다.
+# 특히 단독주택은 제2호가목이 대놓고 제외해서, 철근콘크리트여도 나목 20년이다
+# (건축법상 다가구주택도 단독주택이다). 관악구 표제부 17,795동 중 단독주택이
+# 10,549동이라 이 하나로 노후도가 크게 달라진다.
+RC_KEYS = ("철근콘크리트", "철골콘크리트", "철골철근콘크리트", "강구조", "철골")
 
 
 def _is_rc(struct: str) -> bool:
+    """조례가 열거한 4종 — 철근/철골/철골철근 콘크리트와 강구조."""
     return any(k in (struct or "") for k in RC_KEYS)
 
 
-def _thr_std(b) -> int:      # 검증됨: 일괄 30년
+def _is_apt(b) -> bool:
+    return "공동주택" in (b.용도 or "")
+
+
+def _is_detached(b) -> bool:
+    """건축법 시행령 별표1 제1호 단독주택 — 다가구·다중주택·공관 포함.
+    표제부 주용도코드명이 '단독주택' 으로 오는 그 묶음이다."""
+    return "단독주택" in (b.용도 or "")
+
+
+# 조례 별표1 — RC계 공동주택의 노후 기준 기간 (준공연도 × 층수)
+#   1981.12.31 이전 20년 / 1991.1.1 이후 30년, 사이는 아래 표
+_ANNEX1_5F = {1982: 22, 1983: 24, 1984: 26, 1985: 28}      # 5층 이상, 1986~ 은 30
+_ANNEX1_4F = {1982: 21, 1983: 22, 1984: 23, 1985: 24, 1986: 25,
+              1987: 26, 1988: 27, 1989: 28, 1990: 29}      # 4층 이하, 1991~ 은 30
+
+
+def _annex1(year: int, floors: int) -> int:
+    if year <= 1981:
+        return 20
+    if floors >= 5:
+        return _ANNEX1_5F.get(year, 30)
+    return _ANNEX1_4F.get(year, 30)
+
+
+def _thr_jorye(b) -> int:
+    """조례 §4① 그대로. 이게 서울의 법정 기준이다."""
+    if _is_apt(b):
+        if _is_rc(b.구조) and b.준공연도:
+            return _annex1(b.준공연도, max(b.지상층수, 1))   # §4①1가 + 별표1
+        return 20                                            # §4①1나
+    if _is_rc(b.구조) and not _is_detached(b):
+        return 30                                            # §4①2가 (단독주택 제외)
+    return 20                                                # §4①2나
+
+
+def _thr_std(b) -> int:      # 옛 기준 — 조문 근거 없음. 감도 비교용으로만 남긴다
     return 30
 
 
-def _thr_loose(b) -> int:    # 미검증: 조례 하한 20년 가정
+def _thr_loose(b) -> int:
     return 20
 
 
-def _thr_mixed(b) -> int:    # 미검증: RC계 30년 / 조적·목조 등 20년
-    return 30 if _is_rc(b.구조) else 20
-
-
 THRESHOLDS = {
-    "표준30": (_thr_std, True, "일괄 30년 (도정법 §2·시행령 §2 / 서울 조례 — 검증됨)"),
-    "완화20": (_thr_loose, False, "일괄 20년 (조례 범위 하한 가정 — 미검증)"),
-    "구조혼합": (_thr_mixed, False, "RC계 30년 / 그 외 20년 (구조별 차등 가정 — 미검증)"),
+    "조례": (_thr_jorye, True,
+            "서울 조례 §4① — 공동주택 RC계는 별표1(20~30년), 그 외 공동주택 20년, "
+            "비공동주택 RC계 30년(단독주택 제외), 나머지 20년 (원문 대조 검증됨)"),
+    "일괄30": (_thr_std, False, "일괄 30년 (옛 기본값 — 조문 근거 없음, 비교용)"),
+    "완화20": (_thr_loose, False, "일괄 20년 (조례 하한 — 비교용)"),
 }
+DEFAULT_THR = "조례"
 
 
 @dataclass
@@ -289,7 +339,7 @@ class Aging:
         return "확인필요"
 
 
-def aggregate(bldgs: list[Bldg], unit: str = "dong", 기준: str = "표준30",
+def aggregate(bldgs: list[Bldg], unit: str = "dong", 기준: str = DEFAULT_THR,
               base: date = _BASE, include_부속: bool = False) -> dict[str, Aging]:
     thr_fn, verified, thr_desc = THRESHOLDS[기준]
     UNIT_NAME = {"dong": "법정동", "road": "도로", "bun": "지번블록"}[unit]
@@ -352,7 +402,7 @@ def aggregate(bldgs: list[Bldg], unit: str = "dong", 기준: str = "표준30",
     return buckets
 
 
-def aggregate_zone(bldgs: list[Bldg], zone, parcels=None, 기준: str = "표준30",
+def aggregate_zone(bldgs: list[Bldg], zone, parcels=None, 기준: str = DEFAULT_THR,
                    base: date = _BASE, include_부속: bool = False) -> Aging:
     """정비구역 경계 '안'의 건물만 집계.
 
@@ -711,7 +761,7 @@ def main(argv=None):
     p = argparse.ArgumentParser(description="표제부 CSV 전수집계 → 지역 노후도")
     p.add_argument("--csv", help="표제부 CSV 경로 (기본: 프로젝트 안 *표제부*.csv)")
     p.add_argument("--by", choices=["dong", "road", "bun"], default="dong")
-    p.add_argument("--기준", "--thr", dest="기준", choices=list(THRESHOLDS), default="표준30")
+    p.add_argument("--기준", "--thr", dest="기준", choices=list(THRESHOLDS), default=DEFAULT_THR)
     p.add_argument("--key", help="집계 단위 키 (도로코드 / 본번)")
     p.add_argument("--find", help="이름으로 찾기 (예: 신림로58길)")
     p.add_argument("--zone", help="정비구역 경계로 집계 (예: 신림7) — 대리지표가 아닌 실측")

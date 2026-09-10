@@ -60,7 +60,7 @@ def _aging_payload(q: dict) -> dict:
 
     base = {"ok": True, "by": by, "region": _AG_CACHE.get("region", ""),
             "need": Cfg.REDEV_RATIO, "need_area": Cfg.NOHU_AREA_RATIO,
-            "기준": "표준30", "출처": AG.SRC_DOC, "기준일": AG._BASE.isoformat()}
+            "기준": AG.DEFAULT_THR, "출처": AG.SRC_DOC, "기준일": AG._BASE.isoformat()}
     if key:
         a = buckets.get(key)
         if a is None:
