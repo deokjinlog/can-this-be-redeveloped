@@ -555,19 +555,22 @@ def _조례(조: str, 항=None, 호=None, 목=None) -> str:
         return ""
 
 
-def to_facts(ag: Aging) -> dict:
+def to_facts(ag: Aging, 촉진: bool = False) -> dict:
     """집계 → Fact. 구간이 확정될 때만 Fact 를 주고, 걸치면 None(=확인필요)."""
     out = {"노후불량비율": None, "노후연면적비율": None, "과소필지비율": None,
            "접도율": None, "반지하비율": None}
     span = (f"{ag.label} 주건축물 {ag.total}동 중 노후 {ag.old}동"
             f"{f' · 준공일 미상 {ag.unknown}동' if ag.unknown else ''} "
             f"(경과연수 기준 {ag.기준})")
-    if ag.unknown == 0 or ag.verdict(Cfg.REDEV_RATIO) != "확인필요":
+    # 재정비촉진지구면 동수·연면적 기준선이 둘 다 50% 다 — 걸침도 그 선으로 본다
+    need_r = Cfg.REDEV_RATIO_PROMO if 촉진 else Cfg.REDEV_RATIO
+    need_a = Cfg.NOHU_AREA_RATIO_PROMO if 촉진 else Cfg.NOHU_AREA_RATIO
+    if ag.unknown == 0 or ag.verdict(need_r) != "확인필요":
         # 구간이 기준선을 걸치지 않으면 하한값으로 판정해도 결론이 안 바뀜
         out["노후불량비율"] = Fact(ag.lo, Grade.P1, SRC_DOC, span)
     if ag.연면적합 > 0 and (ag.미상연면적 == 0
-                          or (ag.area_lo >= Cfg.NOHU_AREA_RATIO)
-                          or (ag.area_hi < Cfg.NOHU_AREA_RATIO)):
+                          or (ag.area_lo >= need_a)
+                          or (ag.area_hi < need_a)):
         out["노후연면적비율"] = Fact(
             ag.area_lo, Grade.P1, SRC_DOC,
             f"{ag.label} 연면적 {ag.연면적합:,.0f}㎡ 중 노후 {ag.노후연면적:,.0f}㎡")
@@ -621,7 +624,7 @@ def to_area(ag: Aging, 면적: Optional[float] = None, 촉진: bool = False,
       노후도로 충족/미달을 '확정'하지 않는다. 값과 판정은 그대로 보여주되 잠정 표시.
     proxy=False: 사용자가 '이 범위를 구역으로 본다'고 명시한 경우(aging.py --judge).
     """
-    f = to_facts(ag)
+    f = to_facts(ag, 촉진)
     if ag.unit == "정비구역":
         # 집계 범위가 곧 구역 경계 → 대리지표가 아니라 요건 그 자체. 면적도 고시치를 쓴다.
         proxy = False

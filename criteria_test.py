@@ -51,6 +51,18 @@ cases.append(("⑦반지하55만 충족", "재개발 될 수 있음", RC90,
 cases.append(("⑤면적미상", "확인 필요", RC90,
     Area(노후불량비율=gosi(0.65, "노후도 65%"), 과소필지비율=plan(0.45, "과소필지 45%"))))
 
+# ⑧ 재정비촉진지구는 노후 '연면적' 기준도 50% 다 (영 별표1 제2호나목) — 동수만이 아니다
+cases.append(("⑧재촉지구 노후연면적55 충족", "재개발 될 수 있음", RC90,
+    Area(재정비촉진지구=True, 노후불량비율=gosi(0.55, "노후도 55%"), 면적=plan(15000, "구역 15,000㎡"),
+         과소필지비율=plan(0.30, "과소필지 30%"), 접도율=plan(0.50, "주택접도율 50%"),
+         호수밀도=plan(40, "호수밀도 40동/ha"), 노후연면적비율=plan(0.55, "노후연면적 55%"),
+         반지하비율=plan(0.20, "반지하 20%"))))
+
+# ⑨ 면적 5천~1만㎡ 는 심의 인정 시에만 완화 (조례 §6①2) — 미지정이면 충족으로 올리지 않는다
+cases.append(("⑨면적7천 미지정 → 확인필요", "확인 필요", RC90,
+    Area(노후불량비율=gosi(0.70, "노후도 70%"), 면적=plan(7000, "구역 7,000㎡"),
+         과소필지비율=plan(0.45, "과소필지 45%"))))
+
 # 내 건물 노후 — 조례 §4① 은 넷으로 갈린다. 모르면 [최소, 최대] 로 두고 걸치면 정하지 않는다.
 from criteria_engine import _building_old, V
 def mine(y, **kw):
@@ -63,6 +75,14 @@ b_checks = [
     ("RC 공동 1985 4층 → 별표1 24년, 41년 MET", mine(1985, 용도="공동주택", rc=True, 층수=4), V.MET),
     ("옛 표기 RC공동주택 호환", _building_old(RC90).verdict, V.MET),
 ]
+# ⑩ 재건축 — 지정요건은 영 별표1 제3호, 재건축진단은 사업시행계획인가 전(법 §12①).
+#    '안전진단 D/E' 를 지정 단계에서 요구하면 안 된다.
+_rb = evaluate(RC90, Area(사업유형="재건축", 면적=plan(15000, "구역 15,000㎡")))
+_rq = [r for r in _rb.reqs if "제3호" in r.name]
+b_checks.append(("재건축 → 영 별표1 제3호 요건, 안전진단 요구 없음",
+                 bool(_rq) and "기존 세대수" in (_rq[0].missing_input or "")
+                 and not any("안전진단" in (r.missing_input or "") + (r.value or "") for r in _rb.reqs),
+                 True))
 
 passed = 0
 for name, got, want in b_checks:

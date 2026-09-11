@@ -53,6 +53,7 @@ class Cfg:
     JEOPDO_MAX = 0.40            # 주택접도율 ≤ 40%  (조례 §2⑩ — 폭4m 도로에 4m 접)
     HOSU_DENSITY = 60            # 호수밀도 ≥ 60/ha  (조례 §2⑤ — 1ha당 건축물 동수)
     NOHU_AREA_RATIO = 0.60       # 노후·불량건축물 연면적 ≥ 60%
+    NOHU_AREA_RATIO_PROMO = 0.50 #        재정비촉진지구 50% (영 별표1 제2호나목)
     BANJIHA_RATIO = 0.50         # 반지하 ≥ 1/2   (영 별표1 제2호아목)
     # 서울시 운영기준 — 노후 동수가 이 선을 넘으면 선택요건을 갖춘 것으로 본다.
     # 조례 조문이 아니라 기관 게시(S1): 관악구 고시 후보지모집안내문(2024-10-02)
@@ -219,14 +220,21 @@ def _designated(a: Area) -> Req:
 
 def _area_ratio(a: Area) -> Req:
     if a.사업유형 != "재개발":
-        return Req("지역 노후도 비율", V.NA, value="재건축은 안전진단 트리(별도)", kind="필수")
+        # 재건축 입안대상은 영 별표1 제3호(가~라)다. 노후도 60% 는 재개발(제2호) 요건.
+        # 재건축진단(구 안전진단)은 2024.12.3 개정으로 '사업시행계획인가 전까지'
+        # 실시한다(법 §12①) — 정비구역 지정 단계의 요건이 아니다.
+        return Req("재건축 입안대상 요건(영 별표1 제3호)", V.INSUFFICIENT, grade=Grade.U,
+                   value="가 붕괴 우려 · 나 재해 위해 · 다 노후·불량 + 기존 200세대↑ 또는 "
+                         "부지 1만㎡↑ · 라 아파트·연립 밀집 + 재건축진단 2/3 재건축 판정",
+                   missing_input="재건축 입안대상 자료(영 별표1 제3호 — 기존 세대수·부지면적·노후도)",
+                   kind="필수")
     need = Cfg.REDEV_RATIO_PROMO if a.재정비촉진지구 else Cfg.REDEV_RATIO
     r = _from_fact("지역 노후도 비율", a.노후불량비율, need, ">=", "pct",
                    "정보몽땅 노후도 현황 또는 노후도 조사자료", "필수")
     return r
 
 
-def _area_size(a: Area) -> Req:
+def _area_size(a: Area, designated: bool = False) -> Req:
     if a.면적 is None:
         return Req("정비구역 면적", V.INSUFFICIENT, grade=Grade.U,
                    missing_input="정비계획 자료(구역 면적)", kind="필수")
@@ -234,7 +242,17 @@ def _area_size(a: Area) -> Req:
     if m >= Cfg.MIN_AREA:
         vs, v = f"{m:,.0f}㎡ ≥ 1만㎡ ✓", V.MET
     elif m >= Cfg.MIN_AREA_RELAXED:
-        vs, v = f"{m:,.0f}㎡ (5천~1만㎡, 심의 인정 시 완화)", V.MET
+        # 조례 §6①2 — 5천㎡ 완화는 도시계획위원회(재촉지구는 도시재정비위원회)가
+        # '심의하여 인정하는 경우' 에만 된다. 조건부 요건을 충족으로 올려치지 않는다.
+        # 이미 지정된 구역이면 그 심의를 거친 것이다.
+        if designated:
+            vs, v = f"{m:,.0f}㎡ (5천~1만㎡ — 지정됨, 심의 인정)", V.MET
+        else:
+            return Req("정비구역 면적", V.INSUFFICIENT,
+                       value=f"{m:,.0f}㎡ (5천~1만㎡ — 심의 인정 시에만 완화)",
+                       source_doc=a.면적.source_doc, source_span=a.면적.source_span,
+                       grade=a.면적.grade, kind="필수",
+                       missing_input="도시계획위원회 심의 인정 여부 (조례 §6①2 — 5천~1만㎡ 완화)")
     else:
         vs, v = f"{m:,.0f}㎡ < 5천㎡ ✗", V.NOT_MET
     return Req("정비구역 면적", v, value=vs, source_doc=a.면적.source_doc,
@@ -242,11 +260,13 @@ def _area_size(a: Area) -> Req:
 
 
 def _selects(a: Area) -> list[Req]:
+    # 영 별표1 제2호나목 — 노후 연면적도 재정비촉진지구는 50% 다 (동수만 50% 가 아니다)
+    nohu_a = Cfg.NOHU_AREA_RATIO_PROMO if a.재정비촉진지구 else Cfg.NOHU_AREA_RATIO
     specs = [
         ("과소필지 비율", a.과소필지비율, Cfg.GWASO_RATIO, ">=", "pct", "정비계획 자료(과소필지)"),
         ("주택접도율", a.접도율, Cfg.JEOPDO_MAX, "<=", "pct", "정비계획 자료(주택접도율)"),
         ("호수밀도(ha당)", a.호수밀도, Cfg.HOSU_DENSITY, ">=", "num", "정비계획 자료(호수밀도)"),
-        ("노후 연면적 비율", a.노후연면적비율, Cfg.NOHU_AREA_RATIO, ">=", "pct", "정비계획 자료(노후 연면적)"),
+        ("노후 연면적 비율", a.노후연면적비율, nohu_a, ">=", "pct", "정비계획 자료(노후 연면적)"),
         ("반지하 비율", a.반지하비율, Cfg.BANJIHA_RATIO, ">=", "pct",
          "건축물대장 층별개요(지하층 용도) — 표제부엔 없음"),
     ]
@@ -289,7 +309,7 @@ def evaluate(b: Building, a: Area) -> Report:
         # 지정 고시가 있으면 지정요건 판정은 끝난 사안.
         # 선택요건(과소필지·접도율·호수밀도·노후연면적)은 지정 심사에서 이미 소진됐으므로
         # 더 물어보지 않는다. 남기는 건 '지정 사실 · 구역 면적 · 내 건물' 셋.
-        size = _area_size(a)
+        size = _area_size(a, designated=True)
         size.kind = "지정"
         reqs = [_designated(a), size, _building_old(b)]
         notes = [f"이미 {a.사업유형} 정비구역으로 지정·고시됨 → 지정요건(노후도·면적·선택요건)은 "

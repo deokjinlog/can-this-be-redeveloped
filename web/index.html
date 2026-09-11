@@ -328,6 +328,9 @@ a{color:var(--accent)}
             <button class="chip" data-c="bulgapi" aria-pressed="false">경매·공매(국가·금융기관 채무)</button>
             <button class="chip" data-c="sangsokchwideuk" aria-pressed="false">상속·이혼으로 취득</button>
             <button class="chip" data-c="jijeongjeon" aria-pressed="false">지정 전 계약+60일내 신고</button>
+            <button class="chip" data-c="tojiheoga" aria-pressed="false">지정 전 토지거래허가 신청</button>
+            <button class="chip" data-c="jibunhyeong" aria-pressed="false">지분형주택 공유</button>
+            <button class="chip" data-c="gonggong" aria-pressed="false">공공재개발 시행자에게 양도</button>
           </div>
           <div class="hint" style="font-size:11px;color:var(--ink-3)">구두 주장만으론 확정 불가 → 증빙 요청으로 처리 (근거등급 T)</div>
         </fieldset>
@@ -395,13 +398,17 @@ function evalCriteria(){
   function push(name,law,verdict,val,ev,kind){R.push({name:name,law:law,verdict:verdict,val:val,ev:ev,kind:kind||"필수"})}
 
   if(type==="재건축"){
-    push("정비구역 지정 요건","재건축은 안전진단(D/E) 트리 — 별도","NA","해당없음","",'필수');
-    return {overall:"확인",reqs:R,ask:["재건축 안전진단 결과(구조안전 D/E 등급)"]};
+    /* 재건축 입안대상은 영 별표1 제3호(가~라). 재건축진단(구 안전진단)은 2024.12.3 개정으로
+       '사업시행계획인가 전까지'(법 §12①) — 지정 단계 요건이 아니다 */
+    push("재건축 입안대상 요건","영 별표1 제3호","INSUFFICIENT",
+         "가 붕괴 우려 · 나 재해 위해 · 다 노후·불량 + 기존 200세대↑ 또는 부지 1만㎡↑ · 라 아파트·연립 밀집 + 재건축진단",
+         "재건축 입안대상 자료(영 별표1 제3호 — 기존 세대수·부지면적·노후도)",'필수');
+    return {overall:"확인",reqs:R,ask:["재건축 입안대상 자료(영 별표1 제3호 — 기존 세대수·부지면적·노후도)"]};
   }
   // 면적
   if(area===null) push("정비구역 면적","서울 조례 1만㎡ 이상","INSUFFICIENT",null,"정비계획 자료(구역 면적) 필요");
   else if(area>=10000) push("정비구역 면적","1만㎡ 이상","MET",area.toLocaleString()+"㎡ ≥ 1만","");
-  else if(area>=5000) push("정비구역 면적","5천~1만㎡ 심의 완화","MET",area.toLocaleString()+"㎡ (심의)","");
+  else if(area>=5000) push("정비구역 면적","5천~1만㎡ — 심의 인정 시에만","INSUFFICIENT",area.toLocaleString()+"㎡ (심의 인정 필요)","도시계획위원회 심의 인정 여부 (조례 §6①2 — 5천~1만㎡ 완화)");
   else push("정비구역 면적","1만㎡ 미만","NOT_MET",area.toLocaleString()+"㎡ < 5천","");
   // 노후도
   var need=promo?0.5:0.6;
@@ -413,7 +420,7 @@ function evalCriteria(){
   }
   // 선택
   var selSpecs=[["과소필지",sel.gwaso,0.4,">=","%","과소필지 비율"],["주택접도율",sel.jeopdo,0.4,"<=","%","주택접도율"],
-    ["호수밀도",sel.hosu,60,">=","동","호수밀도"],["노후연면적",sel.nohuA,0.6,">=","%","노후 연면적 비율"],
+    ["호수밀도",sel.hosu,60,">=","동","호수밀도"],["노후연면적",sel.nohuA,promo?0.5:0.6,">=","%","노후 연면적 비율"],  /* 영 별표1 제2호나목 — 재촉지구 50% */
     ["반지하",sel.banjiha,0.5,">=","%","반지하 비율 — 건축물대장 층별개요"]];  /* 영 별표1 제2호아목 */
   var selReqs=[];
   selSpecs.forEach(function(s){
@@ -478,7 +485,7 @@ function evalSucc(){
   var own=num("own"), reside=num("reside"), myeong=num("myeong");
   var onehouse=$("onehouse")?$("onehouse").checked:true;
   var johap=num("johap"), saeop=num("saeop"), chak=num("chak");
-  var claims={sedae:0,sangsok:0,haewoe:0,bulgapi:0};
+  var claims={sedae:0,sangsok:0,haewoe:0,bulgapi:0,jijeongjeon:0,tojiheoga:0,jibunhyeong:0,gonggong:0};
   document.querySelectorAll("#claims .chip").forEach(function(c){claims[c.dataset.c]=c.getAttribute("aria-pressed")==="true"});
   var E=[],ask=[];
 
@@ -504,17 +511,29 @@ function evalSucc(){
   E.push(claimEx("ex2 세대원 전원 이전","법 §39②1호",claims.sedae,"전원 전출 증빙"));
   E.push(claimEx("ex3 상속주택 전원 이전","법 §39②2호",claims.sangsok,"가족관계·상속 서류"));
   E.push(claimEx("ex4 해외이주/2년+","법 §39②3호",claims.haewoe,"해외이주신고·출입국"));
-  var e8=claimEx("ex8 불가피(경매·공매 등)","령 §37③ (원문 미검증)",claims.bulgapi,"경매개시·판결문 등");e8.warn=true;E.push(e8);
+  E.push(claimEx("ex8 부칙 토지등소유자로부터 상속·이혼 취득","령 §37③4호",false,"가족관계증명·이혼 관련 서류"));
+  /* §37③5호 — 경매·공매면 다 되는 게 아니라 국가·지자체·금융기관 채무 불이행에 한정 */
+  E.push(claimEx("ex9 경매·공매(국가·지자체·금융기관 채무 불이행)","령 §37③5호",claims.bulgapi,"경매개시결정·채권자 확인(국가·지자체·금융기관인지)"));
+  E.push(claimEx("ex10 투기과열지구 지정 전 계약+60일 내 거래신고","령 §37③6호",claims.jijeongjeon,"계약서(계약금 지급내역)·부동산거래신고필증"));
+  E.push(claimEx("ex11 지정 전 토지거래허가 신청 → 지정 후 계약","령 §37③7호",claims.tojiheoga,"토지거래허가 신청서·허가서·계약서"));
+  E.push(claimEx("ex12 지분형주택 공급 위해 토지주택공사등과 공유","법 §39②5호",claims.jibunhyeong,"지분형주택 공급 관련 서류"));
+  E.push(claimEx("ex13 공공재개발사업 시행자에게 양도","법 §39②6호",claims.gonggong,"공공재개발 시행자와의 양도 계약"));
 
   // ex5/6/7 재건축
+  // ex5·6 은 재건축 전용(§37③1·2호), ex7 은 '재개발사업ㆍ재건축사업의 토지'(§37③3호) — 재개발도 해당
   if(type==="재건축"){
-    E.push(rebuild("ex5 조합설립+3년 내 사업시행인가 미신청","령 §37②",johap,"조합설립인가",saeop,own));
-    E.push(rebuild("ex6 사업시행인가+3년 내 미착공","령 §37②",saeop,"사업시행인가",chak,own));
-    E.push(rebuild("ex7 착공+3년 내 미준공","령 §37②",chak,"착공",null,own));
+    E.push(rebuild("ex5 조합설립+3년 내 사업시행인가 미신청","령 §37③1호",johap,"조합설립인가",saeop,own));
+    E.push(rebuild("ex6 사업시행인가+3년 내 미착공","령 §37③2호",saeop,"사업시행인가",chak,own));
   } else {
-    ["ex5 사업시행인가 지연","ex6 착공 지연","ex7 준공 지연"].forEach(function(n){
-      E.push({name:n+" (재건축 전용)",law:"령 §37②",verdict:"NA",val:"재개발 해당없음",ev:""})});
+    [["ex5 사업시행인가 지연","령 §37③1호"],["ex6 착공 지연","령 §37③2호"]].forEach(function(x){
+      E.push({name:x[0]+" (재건축 전용)",law:x[1],verdict:"NA",val:"재개발 해당없음",ev:""})});
   }
+  (function(){  /* ex7 — 이 화면엔 준공 입력칸이 없어 '미준공' 을 확정할 수 없고, 대상도 토지로 한정된다 */
+    var r=rebuild("ex7 착공+3년 내 미준공 (재개발·재건축 공통, 토지)","령 §37③3호",chak,"착공",null,own);
+    if(r.verdict==="MET"){ r.verdict="INSUFFICIENT"; r.val=andLabel("INSUFFICIENT");
+      r.miss="준공 여부(정보몽땅) · 양도 대상이 토지인지(등기부 표제부)"; }
+    E.push(r);
+  })();
   // 종합 OR
   var pool=E.filter(function(e){return e.verdict!=="NA"});
   var overall = pool.some(function(e){return e.verdict==="MET"})?"가능"
@@ -540,7 +559,7 @@ function rebuild(name,law,anchor,anchorName,next,own){
   var passed3=(BASE-anchor)>=3, nextExists=(next!==null);
   var a1=(passed3&&!nextExists);
   var ownOk=(own!==null&&(BASE-own)>=3);
-  var v = own===null?"INSUFFICIENT" : (a1&&ownOk)?"MET" : "NOT_MET";
+  var v = !passed3?"NOT_MET" : own===null?"INSUFFICIENT" : (a1&&ownOk)?"MET" : "NOT_MET";
   var ev=anchorName+" "+anchor+" · 후속 "+(nextExists?next:"없음")+" · 소유 "+(own!==null?(BASE-own)+"년":"?");
   return {name:name,law:law,verdict:v,val:andLabel(v),ev:ev,miss:own===null?"매도인 등기부(취득일)":null};
 }
@@ -593,7 +612,7 @@ var PRE={
      샘플 서류까지 함께 채운다 — [서류에서 읽기] 를 누르면 P1 으로 승격돼 실제로 통과한다. */
   green:{type:"재개발",promo:0,toohee:1,area:15000,nohu:70,gwaso:45,jeopdo:"",hosu:"",nohuA:"",built:1990,use:"공동주택",rc:"1",floors:"",banjiha:"",own:2011,reside:2013,myeong:"",johap:"",saeop:"",chak:"",claims:[],
     deungi:"【 갑    구 】 ( 소유권에 관한 사항 )\n순위번호   등 기 목 적      접        수          등 기 원 인      권리자 및 기타사항\n1         소유권보존       1997년8월21일 제45678호                 소유자 김철수 700101-1234567\n2         소유권이전       2011년6월14일 제12345호  2011년5월20일 매매  소유자 홍길동 800202-2345678\n【 을    구 】 ( 소유권 이외의 권리에 관한 사항 )\n1         근저당권설정     2015년1월5일 제100호     2015년1월5일     채무자 홍길동", chobon:"주민등록표 (초본)\n성명 : 홍길동   주민등록번호 : 800202-2345678\n1  서울특별시 강남구 대치동 316 은마아파트 12동 305호   2013년 4월 2일   전입\n2  서울특별시 관악구 신림동 675-159 덕원빌라 101호      2021년 6월 1일   전입"},
-  cash:{type:"재개발",promo:0,toohee:1,area:15000,nohu:70,gwaso:45,jeopdo:"",hosu:"",nohuA:"",built:1990,use:"공동주택",rc:"1",floors:"",banjiha:"",own:2018,reside:2022,myeong:"",johap:"",saeop:"",chak:"",claims:[]},
+  cash:{type:"재개발",promo:0,toohee:1,area:15000,nohu:70,gwaso:45,jeopdo:"",hosu:"",nohuA:"",built:1990,use:"공동주택",rc:"1",floors:"",banjiha:"",own:2018,reside:2022,myeong:"",johap:"",saeop:"",chak:2025,claims:[]},
   hold:{type:"재개발",promo:0,toohee:1,area:15000,nohu:70,gwaso:"",jeopdo:"",hosu:"",nohuA:"",built:1990,use:"공동주택",rc:"1",floors:"",banjiha:"",own:2011,reside:"",myeong:"",johap:"",saeop:"",chak:"",claims:[]}
 };
 // 노후·불량건축물 경과연수 — 서울 조례 §4① (파이썬 criteria_engine.old_years 포팅)

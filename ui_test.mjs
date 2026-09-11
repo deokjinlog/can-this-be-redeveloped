@@ -70,14 +70,21 @@ check("②프리셋 3종이 서로 다른 결론을 낸다", () => {
 });
 
 check("③1세대 1주택 해제 → 장기보유 예외 불성립 (§39②4호)", () => {
+  // 종합 pill 이 아니라 ex1 행 자체를 본다. 다른 예외(예: ex7 준공지연 — 재개발도 해당)가
+  // 확인필요로 남아 있으면 종합은 '확인' 에 머무는 게 맞다(불가로 반올림 금지).
+  const ex1 = () => [...w.document.querySelectorAll("#reqsC .req")]
+    .find((r) => (r.querySelector(".req-name")?.textContent || "").startsWith("ex1"));
+  const dot = () => (ex1()?.querySelector(".dot")?.className || "").replace("dot", "").trim();
   click(q('.preset[data-p="green"]'));
-  const before = txt("#pillC");
+  const before = dot();
   const oh = q("#onehouse");
   oh.checked = false; input(oh);
-  const after = txt("#pillC");
+  const after = dot();
   oh.checked = true; input(oh);
-  assert(before !== after, `1주택 해제가 C 판정을 안 바꿈 (둘 다 ${before})`);
-  return `${before} → ${after}`;
+  assert(ex1(), "ex1 행이 없음");
+  assert(before !== "NOT_MET", `1주택인데 이미 불충족 (${before})`);
+  assert(after === "NOT_MET", `1주택 해제해도 ex1 이 불충족이 아님 (${before} → ${after})`);
+  return `ex1 ${before} → ${after}`;
 });
 
 check("④상속·이혼 취득 칩 → §39② '양수' 아님으로 즉시 통과", () => {
