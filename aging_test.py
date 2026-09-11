@@ -281,6 +281,30 @@ def c15():
 case("⑮반지하는 지하층 유무가 아니라 지하층 용도다", c15)
 
 
+# ⑯ 조례 §4② — 과소필지 안의 건축물로서 2009.8.11 전 건축물은 나이와 무관하게 노후·불량.
+#    필지 면적 밴드가 90㎡ 를 걸치거나 사용승인일이 경계 근처면 정하지 않는다.
+def c16():
+    from aging import _small_lot_old
+    class P:                                   # 필지 과소 판정만 흉내
+        def __init__(s, v): s.과소 = v
+    b = B(2005)
+    b.사용승인일 = "20050301"
+    assert _small_lot_old(b, P("MET")) is True           # 21년이지만 §4②로 노후
+    assert _small_lot_old(b, P("NOT_MET")) is False
+    assert _small_lot_old(b, P("확인필요")) is None      # 밴드가 90㎡ 를 걸침
+    b.사용승인일 = "20090811"
+    assert _small_lot_old(b, P("MET")) is False          # 당일은 '전' 이 아니다
+    b.사용승인일 = "20090810"
+    assert _small_lot_old(b, P("MET")) is True
+    y = B(2009); y.사용승인일 = ""                       # 연도만 2009 → 경계 앞뒤 모름
+    assert _small_lot_old(y, P("MET")) is None
+    assert _small_lot_old(b, None) is None
+    return "과소필지×2009.8.11 전 → 노후 · 밴드 경계·2009 연도만이면 미정"
+
+
+case("⑯조례 §4② 과소필지 안 2009.8.11 전 건축물", c16)
+
+
 passed = 0
 for name, fn in cases:
     try:

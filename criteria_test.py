@@ -51,7 +51,24 @@ cases.append(("⑦반지하55만 충족", "재개발 될 수 있음", RC90,
 cases.append(("⑤면적미상", "확인 필요", RC90,
     Area(노후불량비율=gosi(0.65, "노후도 65%"), 과소필지비율=plan(0.45, "과소필지 45%"))))
 
+# 내 건물 노후 — 조례 §4① 은 넷으로 갈린다. 모르면 [최소, 최대] 로 두고 걸치면 정하지 않는다.
+from criteria_engine import _building_old, V
+def mine(y, **kw):
+    return _building_old(Building(준공일=daejang(date(y, 3, 1), f"사용승인 {y}"), **kw)).verdict
+b_checks = [
+    ("RC 단독주택 25년 → 20년 기준 MET", mine(2001, 용도="단독주택", rc=True), V.MET),
+    ("RC 근생 25년 → 30년 기준 NOT_MET", mine(2001, 용도="제2종근린생활시설", rc=True), V.NOT_MET),
+    ("용도·구조 미상 25년 → 20~30 걸침 확인필요", mine(2001), V.INSUFFICIENT),
+    ("용도·구조 미상 35년 → 어느 기준이든 MET", mine(1991), V.MET),
+    ("RC 공동 1985 4층 → 별표1 24년, 41년 MET", mine(1985, 용도="공동주택", rc=True, 층수=4), V.MET),
+    ("옛 표기 RC공동주택 호환", _building_old(RC90).verdict, V.MET),
+]
+
 passed = 0
+for name, got, want in b_checks:
+    ok = got == want
+    passed += ok
+    print(f"{'✅' if ok else '❌'} 내건물: {name}  ({got.value if hasattr(got, 'value') else got})")
 for name, expect, b, a in cases:
     rep = evaluate(b, a)
     ok = rep.overall == expect
@@ -60,7 +77,7 @@ for name, expect, b, a in cases:
     if not ok:
         print(render(rep))
 
-print(f"\n{passed}/{len(cases)} 통과\n")
+print(f"\n{passed}/{len(cases) + len(b_checks)} 통과\n")
 
 print("=" * 60)
 print("샘플 — ① 재개발 될 수 있음 (필수+선택 충족)")

@@ -20,7 +20,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import date
 
-from criteria_engine import Building, Area, Fact, Grade, evaluate, render
+from criteria_engine import Building, Area, Fact, Grade, evaluate, is_rc, render
 
 BLD_TITLE_URL = "https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo"
 
@@ -98,11 +98,11 @@ def to_building(raw: dict, asof: str) -> Building:
         y, m, d = raw["useAprDay"][:4], raw["useAprDay"][4:6], raw["useAprDay"][6:8]
         준공 = Fact(date(int(y), int(m), int(d)), Grade.P1, src,
                    f"사용승인 {y}-{m}-{d}")
-    st = raw.get("struct") or ""
-    공동 = "공동주택" in (raw.get("purpose") or "") or "아파트" in (raw.get("purpose") or "")
-    rc = any(k in st for k in ("철근콘크리트", "철골", "강구조"))
-    구조 = "RC공동주택" if (rc and 공동) else "기타"
-    return Building(준공일=준공, 구조=구조)
+    # 노후 기준(조례 §4①)은 주용도·구조·층수 셋으로 갈린다 — 뭉개지 않고 넘긴다
+    fl = str(raw.get("grndFlr") or "").strip()
+    return Building(준공일=준공, 용도=raw.get("purpose") or None,
+                    rc=is_rc(raw.get("struct")) if raw.get("struct") else None,
+                    층수=int(fl) if fl.isdigit() and int(fl) > 0 else None)
 
 
 def collect(sigungu, bjdong, bun, ji, mock=False):

@@ -37,10 +37,11 @@ class Grade(Enum):
 # ── 기준값(서울 조례 — 검증됨. 타 지자체는 조례 상이) ──
 class Cfg:
     REGION = "서울"
-    # 노후·불량건축물 경과연수: 준공 후 20~30년 범위 시·도 조례. 서울 RC 공동주택 30년.
-    OLD_YEARS_RC = 30
-    OLD_YEARS_ETC = 30
-    OLD_YEARS_SRC = "도정법 §2·시행령 §2 / 시·도 조례(20~30년, RC 공동주택 30년)"
+    # 노후·불량건축물 경과연수 — 영 §2③1 이 20~30년 범위를 조례에 맡기고, 서울은
+    # 조례 §4① 로 네 갈래를 정한다. 규칙은 아래 old_years() 한 곳에만 둔다.
+    OLD_YEARS_SRC = "영 §2③1 · 서울 조례 §4① (+별표1)"
+    # 조례 §4② — 과소필지 안의 건축물로서 이 날 전에 건축된 것도 노후·불량이다
+    SMALL_LOT_BEFORE = "20090811"
 
     # 주택정비형 재개발 지정요건 (영 별표1 제2호 + 조례 §6①2 — 원문 대조 검증됨)
     REDEV_RATIO = 0.60           # [필수] 노후·불량건축물 동수 비율 ≥ 60%
@@ -76,10 +77,62 @@ class Fact:
     source_span: str = ""
 
 
+# ── 노후·불량건축물 경과연수 (조례 §4①) ──
+RC_KEYS = ("철근콘크리트", "철골콘크리트", "철골철근콘크리트", "강구조", "철골")
+# 별표1 — RC계 공동주택. 1981 이전 20년, 1991 이후 30년, 사이는 층수로 갈린다
+_ANNEX1_5F = {1982: 22, 1983: 24, 1984: 26, 1985: 28}
+_ANNEX1_4F = {1982: 21, 1983: 22, 1984: 23, 1985: 24, 1986: 25,
+              1987: 26, 1988: 27, 1989: 28, 1990: 29}
+
+
+def is_rc(struct: Optional[str]) -> bool:
+    """조례가 열거한 4종 — 철근/철골/철골철근 콘크리트와 강구조."""
+    return any(k in (struct or "") for k in RC_KEYS)
+
+
+def old_years(용도: str, rc: bool, 준공연도: Optional[int],
+              층수: Optional[int]) -> tuple[int, str]:
+    """조례 §4① → (경과연수 기준, 조항). 모든 값을 알 때.
+
+    단독주택(건축법 시행령 별표1 제1호 — 다가구·다중주택 포함)은 제2호가목이
+    명시로 제외하므로 철근콘크리트여도 20년이다.
+    """
+    u = 용도 or ""
+    if "공동주택" in u or "아파트" in u:
+        if rc and 준공연도:
+            if 준공연도 <= 1981:
+                return 20, "조례 §4①1가·별표1"
+            tbl = _ANNEX1_5F if (층수 or 0) >= 5 else _ANNEX1_4F
+            return tbl.get(준공연도, 30), "조례 §4①1가·별표1"
+        return 20, "조례 §4①1나"
+    if rc and "단독주택" not in u:
+        return 30, "조례 §4①2가"
+    return 20, "조례 §4①2나"
+
+
+def old_years_range(용도: Optional[str], rc: Optional[bool], 준공연도: Optional[int],
+                    층수: Optional[int]) -> tuple[int, int, str]:
+    """모르는 값은 가능한 경우를 다 돌려 [최소, 최대]. 반올림하지 않는다."""
+    us = [용도] if 용도 else ["공동주택", "단독주택", "기타"]
+    rs = [rc] if rc is not None else [True, False]
+    fs = [층수] if 층수 else [4, 5]
+    got = {old_years(u, r, 준공연도, f) for u in us for r in rs for f in fs}
+    yrs = sorted(y for y, _ in got)
+    arts = sorted({a for _, a in got})
+    return yrs[0], yrs[-1], arts[0] if len(arts) == 1 else "조례 §4①"
+
+
 @dataclass
 class Building:      # 내 건물 (참고: 노후 여부)
     준공일: Optional[Fact] = None       # date
-    구조: Optional[str] = None          # "RC공동주택" | "기타"
+    구조: Optional[str] = None          # 옛 표기 "RC공동주택" | "기타" — 새 코드는 아래 셋을 쓴다
+    용도: Optional[str] = None          # 주용도 (공동주택/단독주택/근린생활시설 …)
+    rc: Optional[bool] = None           # 조례 §4① 4종 구조 여부
+    층수: Optional[int] = None          # 지상층수 — 별표1 이 5층 이상/4층 이하로 갈린다
+
+    def __post_init__(self):
+        if self.구조 == "RC공동주택" and self.용도 is None:     # 옛 호출 호환
+            self.용도, self.rc = "공동주택", True
 
 
 @dataclass
@@ -142,11 +195,18 @@ def _building_old(b: Building) -> Req:
         return Req("내 건물 노후 여부(경과연수)", V.INSUFFICIENT, grade=Grade.U,
                    missing_input="건축물대장(준공일)", kind="참고")
     yrs = (_BASE - b.준공일.value).days / 365.25
-    need = Cfg.OLD_YEARS_RC if b.구조 == "RC공동주택" else Cfg.OLD_YEARS_ETC
-    return Req("내 건물 노후 여부(경과연수)", V.MET if yrs >= need else V.NOT_MET,
-               value=f"준공 {b.준공일.value} → {yrs:.1f}년 (기준 {need}년)",
-               source_doc=b.준공일.source_doc, source_span=b.준공일.source_span,
-               grade=b.준공일.grade, kind="참고")
+    lo, hi, art = old_years_range(b.용도, b.rc, b.준공일.value.year, b.층수)
+    기준 = f"{lo}년" if lo == hi else f"{lo}~{hi}년 — 용도·구조·층수 미상"
+    common = dict(value=f"준공 {b.준공일.value} → {yrs:.1f}년 (기준 {기준}, {art})",
+                  source_doc=b.준공일.source_doc, source_span=b.준공일.source_span,
+                  grade=b.준공일.grade, kind="참고")
+    if yrs >= hi:
+        return Req("내 건물 노후 여부(경과연수)", V.MET, **common)
+    if yrs < lo:
+        return Req("내 건물 노후 여부(경과연수)", V.NOT_MET, **common)
+    # 기준이 20~30년 사이에서 갈리는데 그 사이에 걸쳤다 → 정하지 않는다
+    return Req("내 건물 노후 여부(경과연수)", V.INSUFFICIENT,
+               missing_input="건축물대장(주용도·구조·지상층수)", **common)
 
 
 def _designated(a: Area) -> Req:

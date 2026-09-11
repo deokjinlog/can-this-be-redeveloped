@@ -39,9 +39,9 @@ def _building_from_raw(raw: dict):
     y = str(raw.get("useAprDay") or "")
     year = int(y[:4]) if len(y) >= 4 and y[:4].isdigit() else None
     st, pu = raw.get("struct") or "", raw.get("purpose") or ""
-    rc = (any(k in st for k in ("철근콘크리트", "철골", "강구조"))
-          and any(k in pu for k in ("공동주택", "아파트", "주택")))
-    b = CE.Building(구조="RC공동주택" if rc else "기타")
+    fl = str(raw.get("grndFlr") or "").strip()
+    b = CE.Building(용도=pu or None, rc=CE.is_rc(st) if st else None,
+                    층수=int(fl) if fl.isdigit() and int(fl) > 0 else None)
     if year:
         try:            # YYYYMMDD 면 그날로, 아니면 그 해 1월 1일로(보수적)
             d = date(year, int(y[4:6]), int(y[6:8])) if len(y) >= 8 else date(year, 1, 1)

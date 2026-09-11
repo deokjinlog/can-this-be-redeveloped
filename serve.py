@@ -220,9 +220,14 @@ def _building_payload(raw: dict) -> dict:
     y = raw.get("useAprDay")
     year = int(y[:4]) if y and len(str(y)) >= 4 else None
     st, pu = raw.get("struct") or "", raw.get("purpose") or ""
-    rc = any(k in st for k in ("철근콘크리트", "철골", "강구조")) and \
-        any(k in pu for k in ("공동주택", "아파트", "주택"))
-    return {"ok": True, "built": year, "struct": "RC공동주택" if rc else "기타",
+    from criteria_engine import is_rc, old_years_range
+    fl = str(raw.get("grndFlr") or "").strip()
+    lo, hi, art = old_years_range(pu or None, is_rc(st) if st else None, year,
+                                  int(fl) if fl.isdigit() and int(fl) > 0 else None)
+    return {"ok": True, "built": year, "struct": st or "기타",
+            "rc": is_rc(st) if st else None,
+            "floors": int(fl) if fl.isdigit() and int(fl) > 0 else None,
+            "old_years": [lo, hi], "old_years_src": art,
             "households": raw.get("households"), "purpose": pu,
             "bldNm": raw.get("bldNm"), "dong": raw.get("_동수")}
 

@@ -53,48 +53,34 @@ SRC_DOC = "건축물대장 표제부 전수(건축HUB 공개 CSV)"
 # 특히 단독주택은 제2호가목이 대놓고 제외해서, 철근콘크리트여도 나목 20년이다
 # (건축법상 다가구주택도 단독주택이다). 관악구 표제부 17,795동 중 단독주택이
 # 10,549동이라 이 하나로 노후도가 크게 달라진다.
-RC_KEYS = ("철근콘크리트", "철골콘크리트", "철골철근콘크리트", "강구조", "철골")
-
-
-def _is_rc(struct: str) -> bool:
-    """조례가 열거한 4종 — 철근/철골/철골철근 콘크리트와 강구조."""
-    return any(k in (struct or "") for k in RC_KEYS)
-
-
-def _is_apt(b) -> bool:
-    return "공동주택" in (b.용도 or "")
-
-
-def _is_detached(b) -> bool:
-    """건축법 시행령 별표1 제1호 단독주택 — 다가구·다중주택·공관 포함.
-    표제부 주용도코드명이 '단독주택' 으로 오는 그 묶음이다."""
-    return "단독주택" in (b.용도 or "")
-
-
-# 조례 별표1 — RC계 공동주택의 노후 기준 기간 (준공연도 × 층수)
-#   1981.12.31 이전 20년 / 1991.1.1 이후 30년, 사이는 아래 표
-_ANNEX1_5F = {1982: 22, 1983: 24, 1984: 26, 1985: 28}      # 5층 이상, 1986~ 은 30
-_ANNEX1_4F = {1982: 21, 1983: 22, 1984: 23, 1985: 24, 1986: 25,
-              1987: 26, 1988: 27, 1989: 28, 1990: 29}      # 4층 이하, 1991~ 은 30
-
-
-def _annex1(year: int, floors: int) -> int:
-    if year <= 1981:
-        return 20
-    if floors >= 5:
-        return _ANNEX1_5F.get(year, 30)
-    return _ANNEX1_4F.get(year, 30)
+from criteria_engine import RC_KEYS, is_rc as _is_rc, old_years  # 규칙은 한 곳에
 
 
 def _thr_jorye(b) -> int:
     """조례 §4① 그대로. 이게 서울의 법정 기준이다."""
-    if _is_apt(b):
-        if _is_rc(b.구조) and b.준공연도:
-            return _annex1(b.준공연도, max(b.지상층수, 1))   # §4①1가 + 별표1
-        return 20                                            # §4①1나
-    if _is_rc(b.구조) and not _is_detached(b):
-        return 30                                            # §4①2가 (단독주택 제외)
-    return 20                                                # §4①2나
+    return old_years(b.용도, _is_rc(b.구조), b.준공연도, max(b.지상층수, 1))[0]
+
+
+def _small_lot_old(b, p) -> Optional[bool]:
+    """조례 §4② — 과소필지 안의 건축물로서 2009.8.11 전에 건축된 것. None=판정 불가.
+
+    필지 면적은 참고도형이라 밴드가 90㎡ 를 걸치면(과소 '확인필요') 정하지 않고,
+    사용승인일이 없어 연도만 2009 면 경계 앞뒤를 알 수 없어 정하지 않는다.
+    """
+    if p is None:
+        return None
+    d = (b.사용승인일 or "").strip()
+    if len(d) == 8 and d.isdigit():
+        before = d < Cfg.SMALL_LOT_BEFORE
+    elif b.준공연도:
+        before = True if b.준공연도 <= 2008 else (False if b.준공연도 >= 2010 else None)
+    else:
+        before = None
+    if before is False or p.과소 == "NOT_MET":
+        return False
+    if before is True and p.과소 == "MET":
+        return True
+    return None
 
 
 def _thr_std(b) -> int:      # 옛 기준 — 조문 근거 없음. 감도 비교용으로만 남긴다
@@ -108,7 +94,8 @@ def _thr_loose(b) -> int:
 THRESHOLDS = {
     "조례": (_thr_jorye, True,
             "서울 조례 §4① — 공동주택 RC계는 별표1(20~30년), 그 외 공동주택 20년, "
-            "비공동주택 RC계 30년(단독주택 제외), 나머지 20년 (원문 대조 검증됨)"),
+            "비공동주택 RC계 30년(단독주택 제외), 나머지 20년 "
+            "+ §4② 과소필지 안 2009.8.11 전 건축물 (원문 대조 검증됨)"),
     "일괄30": (_thr_std, False, "일괄 30년 (옛 기본값 — 조문 근거 없음, 비교용)"),
     "완화20": (_thr_loose, False, "일괄 20년 (조례 하한 — 비교용)"),
 }
@@ -133,6 +120,7 @@ class Bldg:
     가구수: int
     지상층수: int
     부속: bool
+    사용승인일: str = ""   # YYYYMMDD — 조례 §4② 의 2009.8.11 경계용
 
     def 경과연수(self, base: date) -> Optional[int]:
         if self.준공연도 is None:
@@ -242,6 +230,7 @@ def load(path: Optional[str] = None) -> list[Bldg]:
                 가구수=_i(r.get("가구수(가구)")),
                 지상층수=_i(r.get("지상층수")),
                 부속=(r.get("주부속구분코드명", "").strip() == "부속건축물"),
+                사용승인일=(r.get("사용승인일") or "").strip(),
             ))
     return out
 
@@ -287,6 +276,7 @@ class Aging:
     범위밖: bool = False                  # 구역이 가진 표제부 CSV 의 법정동 밖에 있다
     호수: int = 0                        # 조례 §2⑤ 건축물 동수 (호수밀도 분자)
     동목록: list = field(default_factory=list)   # 구역 집계일 때만 [pk, pnu] — 층별개요 조인용
+    과소노후: int = 0                    # 경과연수로는 양호인데 조례 §4② 로 노후인 동
     반지하: int = 0                      # 지하층 일부라도 주거용 (영 별표1 제2호아목)
     반지하미상: int = 0                  # 층별개요를 아직 안 받았거나 용도가 빈 동
 
@@ -429,6 +419,7 @@ def aggregate_zone(bldgs: list[Bldg], zone, parcels=None, 기준: str = DEFAULT_
                        PARCEL.coverage(zone, hits),
                        도로필지=sum(1 for p in hits if p.도로))
     touch = {p.pnu: p.접도 for p in hits}
+    pmap = {p.pnu: p for p in hits}
 
     seen = set()
     for b in bldgs:
@@ -445,7 +436,17 @@ def aggregate_zone(bldgs: list[Bldg], zone, parcels=None, 기준: str = DEFAULT_
             ag.jijeok.접도분모 += 1
             ag.jijeok.접도충족 += bool(t)
         yrs = b.경과연수(base)
-        노후 = None if yrs is None else (yrs >= thr_fn(b))
+        by_age = None if yrs is None else (yrs >= thr_fn(b))
+        # 조례 §4② — 조례 기준일 때만. 비교용 기준셋은 옛 동작 그대로 둔다
+        by_lot = _small_lot_old(b, pmap.get(b.pnu)) if 기준 == "조례" else False
+        if by_age or by_lot:
+            노후 = True
+            if by_lot and not by_age:
+                ag.과소노후 += 1
+        elif by_age is False and by_lot is False:
+            노후 = False
+        else:
+            노후 = None                   # 어느 쪽도 확정 못 함 — 반올림하지 않는다
         if 노후 is None:
             ag.unknown += 1
         elif 노후:

@@ -276,12 +276,15 @@ a{color:var(--accent)}
             <div class="f"><label>주택접도율 (%) ≤40</label><input id="jeopdo" type="number" placeholder="미확인"></div>
           </div>
           <div class="row">
-            <div class="f"><label>호수밀도 (호/ha) ≥60</label><input id="hosu" type="number" placeholder="미확인"></div>
+            <div class="f"><label>호수밀도 (동/ha) ≥60</label><input id="hosu" type="number" placeholder="미확인"></div>
             <div class="f"><label>노후연면적 (%) ≥60</label><input id="nohuA" type="number" placeholder="미확인"></div>
+            <div class="f"><label>반지하 (%) ≥50</label><input id="banjiha" type="number" placeholder="미확인"></div>
           </div>
           <div class="row">
             <div class="f"><label>내 건물 준공연도</label><input id="built" type="number" placeholder="미확인" value="1990"></div>
-            <div class="f"><label>구조</label><select id="struct"><option value="RC공동주택">RC 공동주택</option><option value="기타">기타</option></select></div>
+            <div class="f"><label>주용도</label><select id="use"><option value="">미확인</option><option value="공동주택">공동주택</option><option value="단독주택">단독주택(다가구 포함)</option><option value="기타">그 외(근생 등)</option></select></div>
+            <div class="f"><label>구조</label><select id="rc"><option value="">미확인</option><option value="1">철근콘크리트·철골·강구조</option><option value="0">그 외(벽돌·블록·목조)</option></select></div>
+            <div class="f"><label>지상층수</label><input id="floors" type="number" placeholder="미확인"></div>
           </div>
         </fieldset>
 
@@ -381,14 +384,13 @@ function evalCriteria(){
              val:Math.round(ZONE.area).toLocaleString()+"㎡"+(ZONE.area>=10000?" ≥ 1만 ✓":""),
              ev:"서울시 의제처리구역 위치정보",kind:"필수"});
     var bt=num("built");
-    if(bt!==null) Rz.push({name:"내 건물 노후(경과연수)",law:"참고",
-             verdict:(BASE-bt)>=30?"MET":"NOT_MET",val:"준공 "+bt+" → "+(BASE-bt)+"년/30년",ev:"",kind:"참고"});
+    if(bt!==null) Rz.push(myBuildingReq(bt));
     return {overall:"가능",reqs:Rz,ask:[],designated:true};
   }
   var type=$("type").value, promo=$("promo").checked;
   var area=num("area"), nohu=pct("nohu");
-  var sel={gwaso:pct("gwaso"),jeopdo:pct("jeopdo"),hosu:num("hosu"),nohuA:pct("nohuA")};
-  var built=num("built"), struct=$("struct").value;
+  var sel={gwaso:pct("gwaso"),jeopdo:pct("jeopdo"),hosu:num("hosu"),nohuA:pct("nohuA"),banjiha:pct("banjiha")};
+  var built=num("built");
   var R=[];
   function push(name,law,verdict,val,ev,kind){R.push({name:name,law:law,verdict:verdict,val:val,ev:ev,kind:kind||"필수"})}
 
@@ -411,18 +413,18 @@ function evalCriteria(){
   }
   // 선택
   var selSpecs=[["과소필지",sel.gwaso,0.4,">=","%","과소필지 비율"],["주택접도율",sel.jeopdo,0.4,"<=","%","주택접도율"],
-    ["호수밀도",sel.hosu,60,">=","호","호수밀도"],["노후연면적",sel.nohuA,0.6,">=","%","노후 연면적 비율"]];
+    ["호수밀도",sel.hosu,60,">=","동","호수밀도"],["노후연면적",sel.nohuA,0.6,">=","%","노후 연면적 비율"],
+    ["반지하",sel.banjiha,0.5,">=","%","반지하 비율 — 건축물대장 층별개요"]];  /* 영 별표1 제2호아목 */
   var selReqs=[];
   selSpecs.forEach(function(s){
     var name=s[0],v=s[1],thr=s[2],op=s[3],u=s[4],miss=s[5];
     if(v===null){selReqs.push({name:name,law:"선택요건",verdict:"INSUFFICIENT",val:null,ev:"정비계획 자료("+miss+")",kind:"선택"});return}
     var ok=op===">="?v>=thr:v<=thr;
-    var vs=u==="%"?(v*100).toFixed(0)+"% "+op+" "+(thr*100)+"%":v+"호 "+op+" "+thr;
+    var vs=u==="%"?(v*100).toFixed(0)+"% "+op+" "+(thr*100)+"%":v+u+" "+op+" "+thr;
     selReqs.push({name:name,law:"선택요건",verdict:ok?"MET":"NOT_MET",val:vs+(ok?" ✓":" ✗"),ev:"",kind:"선택"});
   });
   // 내 건물
-  if(built!==null){var yr=BASE-built,nd=struct==="RC공동주택"?30:30;
-    R.push({name:"내 건물 노후(경과연수)",law:"참고",verdict:yr>=nd?"MET":"NOT_MET",val:"준공 "+built+" → "+yr+"년/"+nd+"년",ev:"",kind:"참고"});}
+  if(built!==null) R.push(myBuildingReq(built));
   // 종합
   var ess=R.filter(function(r){return r.kind==="필수"});
   var overall,ask=[];
@@ -431,7 +433,16 @@ function evalCriteria(){
   var selMet=selReqs.some(function(r){return eff(r)==="MET"});
   if(ess.some(function(r){return eff(r)==="NOT_MET"})) overall="미달";
   else if(ess.some(function(r){return eff(r)==="INSUFFICIENT"})) overall="확인";
-  else { overall=selMet?"가능":(selReqs.some(function(r){return eff(r)==="INSUFFICIENT"})?"확인":"미달"); }
+  else {
+    var nr=R.filter(function(r){return r.name==="지역 노후도"})[0];
+    var waive=nohu!==null&&nohu>=0.75&&!(nr&&nr.provisional);
+    if(selMet) overall="가능";
+    else if(waive){ overall="가능";   /* 서울시 운영기준 — 조례 조문 아님(S1) */
+      nr.val+=" · 75% 이상 → 선택요건 갖춘 것으로 봄(서울시 운영기준, S1)"; }
+    else if(selReqs.some(function(r){return eff(r)==="INSUFFICIENT"})) overall="확인";
+    else { overall="확인";            /* 영 별표1 제2호는 목이 가~자 9개 — 안 재는 목이 남는다 */
+      ask.push("영 별표1 제2호 나머지 목 해당 여부(방재지구·최저고도지구·역세권 등)"); }
+  }
   // ask 자료(필수 INSUFFICIENT + 선택 미충족 시 선택)
   R.forEach(function(r){if((r.verdict==="INSUFFICIENT"||r.provisional)&&r.ev) ask.push(r.ev)});
   if(!selMet) selReqs.forEach(function(r){if(r.verdict==="INSUFFICIENT") ask.push(r.ev)});
@@ -580,17 +591,49 @@ function run(){
 var PRE={
   /* green 은 '이렇게 하면 통과한다' 를 보여주는 예시다. 서류 없이는 확정되지 않으므로
      샘플 서류까지 함께 채운다 — [서류에서 읽기] 를 누르면 P1 으로 승격돼 실제로 통과한다. */
-  green:{type:"재개발",promo:0,toohee:1,area:15000,nohu:70,gwaso:45,jeopdo:"",hosu:"",nohuA:"",built:1990,struct:"RC공동주택",own:2011,reside:2013,myeong:"",johap:"",saeop:"",chak:"",claims:[],
+  green:{type:"재개발",promo:0,toohee:1,area:15000,nohu:70,gwaso:45,jeopdo:"",hosu:"",nohuA:"",built:1990,use:"공동주택",rc:"1",floors:"",banjiha:"",own:2011,reside:2013,myeong:"",johap:"",saeop:"",chak:"",claims:[],
     deungi:"【 갑    구 】 ( 소유권에 관한 사항 )\n순위번호   등 기 목 적      접        수          등 기 원 인      권리자 및 기타사항\n1         소유권보존       1997년8월21일 제45678호                 소유자 김철수 700101-1234567\n2         소유권이전       2011년6월14일 제12345호  2011년5월20일 매매  소유자 홍길동 800202-2345678\n【 을    구 】 ( 소유권 이외의 권리에 관한 사항 )\n1         근저당권설정     2015년1월5일 제100호     2015년1월5일     채무자 홍길동", chobon:"주민등록표 (초본)\n성명 : 홍길동   주민등록번호 : 800202-2345678\n1  서울특별시 강남구 대치동 316 은마아파트 12동 305호   2013년 4월 2일   전입\n2  서울특별시 관악구 신림동 675-159 덕원빌라 101호      2021년 6월 1일   전입"},
-  cash:{type:"재개발",promo:0,toohee:1,area:15000,nohu:70,gwaso:45,jeopdo:"",hosu:"",nohuA:"",built:1990,struct:"RC공동주택",own:2018,reside:2022,myeong:"",johap:"",saeop:"",chak:"",claims:[]},
-  hold:{type:"재개발",promo:0,toohee:1,area:15000,nohu:70,gwaso:"",jeopdo:"",hosu:"",nohuA:"",built:1990,struct:"RC공동주택",own:2011,reside:"",myeong:"",johap:"",saeop:"",chak:"",claims:[]}
+  cash:{type:"재개발",promo:0,toohee:1,area:15000,nohu:70,gwaso:45,jeopdo:"",hosu:"",nohuA:"",built:1990,use:"공동주택",rc:"1",floors:"",banjiha:"",own:2018,reside:2022,myeong:"",johap:"",saeop:"",chak:"",claims:[]},
+  hold:{type:"재개발",promo:0,toohee:1,area:15000,nohu:70,gwaso:"",jeopdo:"",hosu:"",nohuA:"",built:1990,use:"공동주택",rc:"1",floors:"",banjiha:"",own:2011,reside:"",myeong:"",johap:"",saeop:"",chak:"",claims:[]}
 };
+// 노후·불량건축물 경과연수 — 서울 조례 §4① (파이썬 criteria_engine.old_years 포팅)
+//   공동주택 RC계 = 별표1(준공연도×층수) / 그 외 공동주택 20 / 비공동 RC계 30(단독주택 제외) / 나머지 20
+var ANX5={1982:22,1983:24,1984:26,1985:28}, ANX4={1982:21,1983:22,1984:23,1985:24,1986:25,1987:26,1988:27,1989:28,1990:29};
+function oldYears(use,rc,yr,fl){
+  if(use==="공동주택"){
+    if(rc&&yr){ if(yr<=1981) return [20,"조례 §4①1가·별표1"];
+      var t=(fl||0)>=5?ANX5:ANX4; return [t[yr]||30,"조례 §4①1가·별표1"]; }
+    return [20,"조례 §4①1나"]; }
+  if(rc&&use!=="단독주택") return [30,"조례 §4①2가"];
+  return [20,"조례 §4①2나"];
+}
+function oldYearsRange(use,rc,yr,fl){   // 모르는 값은 가능한 경우를 다 돌린다 — 반올림 금지
+  var us=use?[use]:["공동주택","단독주택","기타"], rs=rc===null?[true,false]:[rc], fs=fl?[fl]:[4,5];
+  var ys=[],arts={};
+  us.forEach(function(u){rs.forEach(function(r){fs.forEach(function(f){var o=oldYears(u,r,yr,f);ys.push(o[0]);arts[o[1]]=1})})});
+  var a=Object.keys(arts); return [Math.min.apply(null,ys),Math.max.apply(null,ys),a.length===1?a[0]:"조례 §4①"];
+}
+function myBuildingReq(built){
+  var use=$("use").value||null, rcv=$("rc").value, rc=rcv===""?null:rcv==="1", fl=num("floors");
+  var r=oldYearsRange(use,rc,built,fl), yr=BASE-built;
+  var 기준=r[0]===r[1]?r[0]+"년":r[0]+"~"+r[1]+"년(용도·구조·층수 미상)";
+  var v=yr>=r[1]?"MET":(yr<r[0]?"NOT_MET":"INSUFFICIENT");
+  return {name:"내 건물 노후(경과연수)",law:"참고",verdict:v,
+          val:"준공 "+built+" → "+yr+"년 / 기준 "+기준+" · "+r[2],kind:"참고",
+          ev:v==="INSUFFICIENT"?"건축물대장(주용도·구조·지상층수)":""};
+}
+function fillBuilding(b){
+  if(b.built) $("built").value=b.built;
+  var u=b.purpose||""; $("use").value=u.indexOf("공동주택")>=0||u.indexOf("아파트")>=0?"공동주택":(u.indexOf("단독주택")>=0?"단독주택":(u?"기타":""));
+  $("rc").value=b.rc===true?"1":(b.rc===false?"0":"");
+  $("floors").value=b.floors||"";
+}
 function applyPreset(p){var d=PRE[p];if(!d)return;
   ZONE=null; GATE=null; PROXY=false; ANCHORS=null; DOCSRC={own:null,reside:null,sangsok:false};
   $("ad-zone").innerHTML=""; if($("dualBox")) $("dualBox").innerHTML="";
-  ["type","struct"].forEach(function(k){$(k).value=d[k]});
+  ["type","use","rc"].forEach(function(k){$(k).value=d[k]||""});
   ["promo","toohee"].forEach(function(k){$(k).checked=!!d[k]});
-  ["area","nohu","gwaso","jeopdo","hosu","nohuA","built","own","reside","myeong","johap","saeop","chak"].forEach(function(k){$(k).value=d[k]});
+  ["area","nohu","gwaso","jeopdo","hosu","nohuA","banjiha","built","floors","own","reside","myeong","johap","saeop","chak"].forEach(function(k){$(k).value=d[k]===undefined?"":d[k]});
   $("doc-deungi").value=d.deungi||""; $("doc-chobon").value=d.chobon||"";
   $("doc-msg").textContent=d.deungi
     ? "샘플 서류를 채웠습니다 — [서류에서 읽기] 를 누르면 P1 으로 승격돼 확정됩니다."
@@ -626,8 +669,7 @@ $("af-btn").addEventListener("click",function(){
   $("af-msg").textContent="조회 중…";
   fetch("/api/gather?"+qs).then(function(r){return r.json()}).then(function(d){
     if(!d.ok){$("af-msg").textContent="⚠️ "+(d.error||"조회 실패 — 코드·지번 확인");return}
-    if(d.built) $("built").value=d.built;
-    if(d.struct) $("struct").value=d.struct;
+    fillBuilding(d);
     $("af-msg").textContent="✓ "+(d.bldNm||"")+" · 준공 "+(d.built||"?")+" · "+(d.households||0)+"세대 · "+(d.dong||1)+"개동 → 내 건물 채움";
     run();
   }).catch(function(){
@@ -745,7 +787,7 @@ function adRender(d){
     $(id).value=[a.sigungu,a.bjdong,a.bun,a.ji][i]});
   if(d.zoneArea) $("area").value=Math.round(d.zoneArea);
   var b=d.building;
-  if(b&&b.ok){ if(b.built)$("built").value=b.built; if(b.struct)$("struct").value=b.struct;
+  if(b&&b.ok){ fillBuilding(b);
     $("af-msg").textContent="✓ "+(b.bldNm||"")+" · 준공 "+(b.built||"?")+" · "+(b.households||0)+"세대"; }
   PROXY=false;
   if(d.site){
